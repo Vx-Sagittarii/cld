@@ -616,19 +616,16 @@ function viewAstro() {
   } catch (e) { return `<div class="empty">Astro indisponible</div>`; }
 }
 
-// ----- Changement du code de connexion (validé par un code reçu par e-mail) -----
+// ----- Changement du code de connexion (chiffres uniquement, directement depuis Réglages) -----
 function pinCard() {
   const pc = ui.pc, msg = pc?.msg ? `<p class="lg-err">${esc(pc.msg)}</p>` : "";
   const inner = !pc
-    ? `<p class="muted">Ton code ne contient que des chiffres. Pour le changer, un code de validation est envoyé à ton e-mail : sans lui, rien ne change.</p>
+    ? `<p class="muted">Ton code ne contient que des chiffres (6 à 12). Tu peux le changer ici, il faut juste saisir l'ancien.</p>
        <div class="btn-line"><button class="btn small" data-act="pc-start">Changer mon code</button></div>`
-    : pc.step === 1
-      ? `<div class="field"><label>Nouveau code (6 à 12 chiffres)</label><input class="numonly" id="pcNew" type="password" inputmode="numeric" maxlength="12" autocomplete="new-password"></div>
-         <div class="field"><label>Confirme le nouveau code</label><input class="numonly" id="pcNew2" type="password" inputmode="numeric" maxlength="12" autocomplete="new-password"></div>
-         ${msg}<div class="btn-line"><button class="btn small" data-act="pc-send">Recevoir le code par e-mail</button><button class="btn small" data-act="pc-cancel">Annuler</button></div>`
-      : `<p class="muted">Un code à 6 chiffres vient d'être envoyé à ${esc(pc.to || "ton e-mail")}. Il est valable 10 minutes.</p>
-         <div class="field"><label>Code reçu par e-mail</label><input class="numonly" id="pcCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code"></div>
-         ${msg}<div class="btn-line"><button class="btn small" data-act="pc-confirm">Valider</button><button class="btn small" data-act="pc-cancel">Annuler</button></div>`;
+    : `<div class="field"><label>Code actuel</label><input class="numonly" id="pcOld" type="password" inputmode="numeric" maxlength="12" autocomplete="current-password"></div>
+       <div class="field"><label>Nouveau code (6 à 12 chiffres)</label><input class="numonly" id="pcNew" type="password" inputmode="numeric" maxlength="12" autocomplete="new-password"></div>
+       <div class="field"><label>Confirme le nouveau code</label><input class="numonly" id="pcNew2" type="password" inputmode="numeric" maxlength="12" autocomplete="new-password"></div>
+       ${msg}<div class="btn-line"><button class="btn small" data-act="pc-save">Enregistrer</button><button class="btn small" data-act="pc-cancel">Annuler</button></div>`;
   return `<div class="card"><h3>Code de connexion</h3>${inner}</div>`;
 }
 document.addEventListener("input", (ev) => { if (ev.target.classList?.contains("numonly")) ev.target.value = ev.target.value.replace(/\D/g, ""); });
@@ -878,26 +875,18 @@ document.addEventListener("click", (ev) => {
       break;
     }
     case "pin-key": pinKey(el.dataset.k); break;
-    case "pc-start": ui.pc = { step: 1 }; render(); break;
+    case "pc-start": ui.pc = {}; render(); break;
     case "pc-cancel": ui.pc = null; render(); break;
-    case "pc-send": {
-      const a = $("#pcNew").value, b = $("#pcNew2").value;
-      if (!/^\d{6,12}$/.test(a)) { ui.pc.msg = "Le code doit contenir uniquement des chiffres (6 à 12)."; render(); break; }
-      if (a !== b) { ui.pc.msg = "Les deux codes ne sont pas identiques."; render(); break; }
+    case "pc-save": {
+      const o = $("#pcOld").value, a = $("#pcNew").value, b = $("#pcNew2").value;
+      if (!/^\d{4,12}$/.test(o)) { ui.pc.msg = "Saisis ton code actuel (chiffres uniquement)."; render(); break; }
+      if (!/^\d{6,12}$/.test(a)) { ui.pc.msg = "Le nouveau code doit contenir uniquement des chiffres (6 à 12)."; render(); break; }
+      if (a !== b) { ui.pc.msg = "Les deux nouveaux codes ne sont pas identiques."; render(); break; }
       el.disabled = true;
-      rpc("request_pin_change", { p_token: token, p_new: a }).then((r) => {
-        ui.pc = r?.sent ? { step: 2, to: r.to } : { step: 1, msg: r?.error || "Impossible d'envoyer le code." }; render();
-      }).catch(() => { ui.pc = { step: 1, msg: "Connexion impossible." }; render(); });
-      break;
-    }
-    case "pc-confirm": {
-      const c = $("#pcCode").value;
-      if (!/^\d{6}$/.test(c)) { ui.pc.msg = "Saisis le code à 6 chiffres reçu par e-mail."; render(); break; }
-      el.disabled = true;
-      rpc("confirm_pin_change", { p_token: token, p_code: c }).then((r) => {
+      rpc("change_pin", { p_token: token, p_old: o, p_new: a }).then((r) => {
         if (r?.token) { try { localStorage.setItem(TOKEN_KEY, r.token); } catch (e) {} ui.pc = null; alert("Code modifié. Tes autres appareils devront se reconnecter avec le nouveau code."); location.reload(); }
-        else { ui.pc = { step: 2, to: ui.pc?.to, msg: r?.error || "Code incorrect." }; render(); }
-      }).catch(() => { ui.pc.msg = "Connexion impossible."; render(); });
+        else { ui.pc = { msg: r?.error || "Impossible de changer le code." }; render(); }
+      }).catch(() => { ui.pc = { msg: "Connexion impossible." }; render(); });
       break;
     }
     case "login": {

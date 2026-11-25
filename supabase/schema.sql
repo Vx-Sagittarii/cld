@@ -385,41 +385,26 @@ begin
   return json_build_object('token', p.token, 'id', p.id);
 end $$;
 
--- Étape 1 : le nouveau code est mis en attente, un code de validation à 6 chiffres part par e-mail
-create or replace function request_pin_change(p_token uuid, p_new text) returns json
+-- Changement de code direct (chiffres uniquement) : exige l'ancien code ; 5 erreurs = blocage 15 min ; les autres appareils sont déconnectés
+create or replace function change_pin(p_token uuid, p_old text, p_new text) returns json
 language plpgsql security definer set search_path = public, extensions as $$
-declare p profiles := _me(p_token); code text;
+declare p profiles := _me(p_token); th login_throttle; kk text := 'chg-' || p.id; nf int; nt uuid;
 begin
   if p_new is null or p_new !~ '^[0-9]{6,12}$' then return json_build_object('error', 'Le code doit contenir uniquement des chiffres (6 à 12).'); end if;
-  if p.email is null then return json_build_object('error', 'Aucun e-mail enregistré pour ce profil.'); end if;
-  if p.chg_expires is not null and p.chg_expires - interval '9 minutes' > now() then return json_build_object('error', 'Un code vient d''être envoyé, attends une minute.'); end if;
-  code := lpad((abs(('x' || encode(gen_random_bytes(4), 'hex'))::bit(32)::bigint) % 1000000)::text, 6, '0');
-  update profiles set chg_hash = crypt(code, gen_salt('bf')), chg_pin = crypt(p_new, gen_salt('bf')),
-    chg_expires = now() + interval '10 minutes', chg_fails = 0 where id = p.id;
-  perform net.http_post(url := 'https://smypdolihotxtdlbgqua.supabase.co/functions/v1/send-code',
-    headers := jsonb_build_object('Content-Type', 'application/json', 'x-key', '@@SECRET@@'),
-    body := jsonb_build_object('email', p.email, 'code', code));
-  return json_build_object('sent', true, 'to', regexp_replace(p.email, '^(.).*(@.*)$', '\1***\2'));
-end $$;
-
--- Étape 2 : le code reçu par e-mail valide le changement (sinon refusé). Les autres appareils sont déconnectés.
-create or replace function confirm_pin_change(p_token uuid, p_code text) returns json
-language plpgsql security definer set search_path = public, extensions as $$
-declare p profiles := _me(p_token); nt uuid;
-begin
-  if p.chg_expires is null or p.chg_expires < now() or p.chg_hash is null then return json_build_object('error', 'Code expiré, recommence.'); end if;
-  if p.chg_fails >= 5 then
-    update profiles set chg_hash = null, chg_pin = null, chg_expires = null, chg_fails = 0 where id = p.id;
-    return json_build_object('error', 'Trop d''essais, recommence.');
+  select * into th from login_throttle where k = kk;
+  if th.locked_until is not null and th.locked_until > now() then return json_build_object('error', 'Trop d''erreurs, réessaie dans 15 minutes.'); end if;
+  if p_old is null or p_old !~ '^[0-9]{4,12}$' or p.pin_hash is null or p.pin_hash <> crypt(p_old, p.pin_hash) then
+    nf := case when th.k is null or (th.locked_until is not null and th.locked_until <= now()) then 1 else th.fails + 1 end;
+    insert into login_throttle(k, fails, locked_until) values (kk, nf, case when nf >= 5 then now() + interval '15 minutes' end)
+      on conflict (k) do update set fails = excluded.fails, locked_until = excluded.locked_until;
+    return json_build_object('error', 'Code actuel incorrect.');
   end if;
-  if p_code is null or p_code !~ '^[0-9]{6}$' or crypt(p_code, p.chg_hash) <> p.chg_hash then
-    update profiles set chg_fails = chg_fails + 1 where id = p.id;
-    return json_build_object('error', 'Code incorrect.');
-  end if;
+  delete from login_throttle where k = kk;
   nt := gen_random_uuid();
-  update profiles set pin_hash = chg_pin, token = nt, chg_hash = null, chg_pin = null, chg_expires = null, chg_fails = 0 where id = p.id;
+  update profiles set pin_hash = crypt(p_new, gen_salt('bf')), token = nt where id = p.id;
   return json_build_object('token', nt);
 end $$;
-
-revoke all on function request_pin_change(uuid, text), confirm_pin_change(uuid, text) from public;
-grant execute on function request_pin_change(uuid, text), confirm_pin_change(uuid, text) to anon, authenticated;
+revoke all on function change_pin(uuid, text, text) from public;
+grant execute on function change_pin(uuid, text, text) to anon, authenticated;
+drop function if exists request_pin_change(uuid, text);
+drop function if exists confirm_pin_change(uuid, text);
