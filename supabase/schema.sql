@@ -691,3 +691,67 @@ select cron.schedule('hevy-daily', '0 20,21 * * *', $$
     headers := '{"Content-Type":"application/json"}'::jsonb,
     body := jsonb_build_object('cron', (select value from cron_secret limit 1)));
 $$);
+-- ============ Migration 13 : montre connectée (Strava par OAuth, Garmin par API personnelle) ============
+create table if not exists watch_keys (
+  profile_id text not null references profiles(id) on delete cascade,
+  provider text not null check (provider in ('strava','garmin')),
+  api_key text,            -- Garmin : clé API personnelle
+  client_id text,          -- Strava : identifiant de ton application
+  client_secret text,      -- Strava : secret de ton application (jamais renvoyé à l'appli)
+  refresh_token text, access_token text, expires_at timestamptz,
+  synced_at timestamptz,
+  primary key (profile_id, provider)
+);
+create table if not exists activities (
+  id text primary key,     -- "strava:123" / "garmin:456"
+  profile_id text not null references profiles(id) on delete cascade,
+  provider text not null,
+  day date not null,
+  title text, kind text,
+  start_time timestamptz, secs int, dist_m int, kcal int, avg_hr int
+);
+create index if not exists activities_day on activities(profile_id, day);
+alter table watch_keys enable row level security;
+alter table activities enable row level security;
+grant select, insert, update, delete on public.watch_keys, public.activities to service_role;
+
+create or replace function set_watch_key(p_token uuid, p_provider text, p_api_key text, p_client_id text, p_client_secret text) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  if p_provider not in ('strava','garmin') then raise exception 'invalide'; end if;
+  insert into watch_keys(profile_id, provider, api_key, client_id, client_secret)
+  values (me.id, p_provider, nullif(trim(p_api_key), ''), nullif(trim(p_client_id), ''), nullif(trim(p_client_secret), ''))
+  on conflict (profile_id, provider) do update set api_key = excluded.api_key, client_id = excluded.client_id, client_secret = excluded.client_secret,
+    refresh_token = null, access_token = null, expires_at = null;
+end $$;
+
+create or replace function delete_watch(p_token uuid, p_provider text) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  delete from watch_keys where profile_id = me.id and provider = p_provider;
+  delete from activities where profile_id = me.id and provider = p_provider;
+end $$;
+
+-- get_sport enrichi : montres connectées (sans secrets) + activités (les siennes + celles de l'autre membre du couple)
+create or replace function get_sport(p_token uuid) returns json
+language plpgsql stable security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  return json_build_object(
+    'goals', coalesce((select json_agg(json_build_object('owner', g.profile_id, 'from', g.from_week, 'gym', g.gym, 'pole', g.pole))
+                       from sport_goals g where g.profile_id = me.id or (_is_pair(me.id) and _is_pair(g.profile_id))), '[]'::json),
+    'logs',  coalesce((select json_agg(json_build_object('owner', l.profile_id, 'day', l.day, 'kind', l.kind))
+                       from sport_logs l where l.day >= current_date - 400 and (l.profile_id = me.id or (_is_pair(me.id) and _is_pair(l.profile_id)))), '[]'::json),
+    'watch', coalesce((select json_agg(json_build_object('provider', k.provider, 'synced_at', k.synced_at, 'linked', (k.refresh_token is not null or k.api_key is not null), 'client_id', k.client_id))
+                       from watch_keys k where k.profile_id = me.id), '[]'::json),
+    'acts',  coalesce((select json_agg(json_build_object('owner', a.profile_id, 'id', a.id, 'provider', a.provider, 'day', a.day, 'title', a.title, 'kind', a.kind,
+                         'start', a.start_time, 'secs', a.secs, 'dist', a.dist_m, 'kcal', a.kcal, 'hr', a.avg_hr) order by a.start_time desc)
+                       from activities a where a.day >= current_date - 400 and (a.profile_id = me.id or (_is_pair(me.id) and _is_pair(a.profile_id)))), '[]'::json));
+end $$;
+revoke all on function set_watch_key(uuid,text,text,text,text), delete_watch(uuid,text) from public;
+grant execute on function set_watch_key(uuid,text,text,text,text), delete_watch(uuid,text) to anon, authenticated;

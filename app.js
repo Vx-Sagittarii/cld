@@ -713,15 +713,19 @@ function viewSport() {
   inP.forEach((w) => (w.ex || []).forEach((e) => { if (e.m) mus.set(e.m, (mus.get(e.m) || 0) + (e.s || 0)); }));
   const mlist = [...mus.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8), mmax = Math.max(1, ...mlist.map((x) => x[1]));
   const noMuscle = inP.length && !mlist.length;
+  const myActs = (state.acts || []).filter((a) => a.owner === who);
+  const actsM = myActs.filter((a) => String(a.day).slice(0, 7) === y + "-" + pad(mo + 1)), actDays = new Set(myActs.map((a) => String(a.day).slice(0, 10)));
   // grille du mois
   const first = mondayOf(m); let cells = "";
   for (let i = 0; i < 42; i++) {
     const d = addDays(first, i), iso = toISO(d);
     if (i >= 35 && d.getMonth() !== mo) break;
     const n = days.get(iso) || 0, inMonth = d.getMonth() === mo;
-    cells += `<button class="day sp ${!inMonth ? "out" : ""} ${n ? "went" : ""} ${hasPole(who, iso) ? "pole" : ""} ${iso === toISO(today) ? "today" : ""} ${iso === ui.selected ? "sel" : ""}" style="--c:${p?.color || "#A45CFF"}" data-act="pick" data-date="${iso}">${d.getDate()}${n > 1 ? `<span class="cnt">${n}</span>` : ""}</button>`;
+    cells += `<button class="day sp ${!inMonth ? "out" : ""} ${n ? "went" : ""} ${hasPole(who, iso) ? "pole" : ""} ${actDays.has(iso) ? "act" : ""} ${iso === toISO(today) ? "today" : ""} ${iso === ui.selected ? "sel" : ""}" style="--c:${p?.color || "#A45CFF"}" data-act="pick" data-date="${iso}">${d.getDate()}${n > 1 ? `<span class="cnt">${n}</span>` : ""}</button>`;
   }
   const dayWs = all.filter((w) => wIso(w.day) === ui.selected);
+  const dayActs = myActs.filter((a) => String(a.day).slice(0, 10) === ui.selected);
+  const watchLinked = (state.watch || []).some((w) => w.linked);
   const poleN = (state.logs || []).filter((l) => l.owner === who && l.kind === "pole" && String(l.day).slice(0, 7) === y + "-" + pad(mo + 1)).length;
   const poleOwn = who === me && !viewing() ? `<button class="btn small ${hasPole(me, ui.selected) ? "primary" : ""}" data-act="pole-toggle" data-day="${ui.selected}" style="margin-top:8px">🩰 Pole dance ce jour ${hasPole(me, ui.selected) ? "✓" : "＋"}</button>` : (hasPole(who, ui.selected) ? `<div class="empty">🩰 Pole dance ce jour</div>` : "");
   const noKey = who === me && !hevyOn;
@@ -744,7 +748,7 @@ function viewSport() {
     ${poleN ? `<div class="polecount">🩰 Pole dance : <b>${poleN}</b> jour${poleN > 1 ? "s" : ""} ce mois-ci</div>` : ""}
     ${cloud && isPair(me) ? sportGoalCard(who) : ""}
     <div class="card">
-      <h3>Jours d'entraînement <small class="legend"><i class="lg gym"></i>salle <i class="lg pole"></i>pole</small></h3>
+      <h3>Jours d'entraînement <small class="legend"><i class="lg gym"></i>salle <i class="lg pole"></i>pole <i class="lg act"></i>montre</small></h3>
       <div class="dow"><span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span></div>
       <div class="grid">${cells}</div>
     </div>
@@ -760,6 +764,11 @@ function viewSport() {
       ${mlist.length ? mlist.map(([k, n]) => `<div class="mrow"><span>${MUSCLE_FR[k] || esc(k)}</span><div class="mbar"><i style="width:${Math.round((n / mmax) * 100)}%;--c:${p?.color || "#A45CFF"}"></i></div><em>${n} séries</em></div>`).join("")
         : `<div class="empty">${noMuscle ? "Les muscles apparaissent après « Actualiser » (accueil ou Réglages › Hevy)." : ui.bodyP === "week" ? "Pas de séance cette semaine." : "Pas encore de séance ce mois-ci."}</div>`}
     </div>
+    ${(actsM.length || dayActs.length || watchLinked || (who === me && !viewing())) ? `<div class="card"><h3>⌚ Montre connectée</h3>
+      ${actsM.length ? `<div class="spstats" style="--c:${p?.color || "#A45CFF"};margin-bottom:10px"><div><b>${actsM.length}</b><span>activité${actsM.length > 1 ? "s" : ""}</span></div><div><b>${fmtKm(actsM.reduce((t, a) => t + (a.dist || 0), 0))}</b><span>parcourus</span></div><div><b>${fmtSecs(actsM.reduce((t, a) => t + (a.secs || 0), 0))}</b><span>d'effort</span></div></div>` : ""}
+      ${dayActs.length ? dayActs.map((a) => { const [ic, nm] = kindOf(a.kind); return `<div class="row"><div class="bar-owner" style="background:${p?.color || "#888"}"></div><div class="t"><b>${ic} ${esc(a.title || nm)}</b><small>${[nm, a.secs ? fmtSecs(a.secs) : "", a.dist ? fmtKm(a.dist) : "", a.hr ? a.hr + " bpm" : "", a.kcal ? a.kcal + " kcal" : "", WATCH[a.provider]].filter(Boolean).join(" · ")}</small></div></div>`; }).join("")
+        : (watchLinked || actsM.length ? `<div class="empty">Pas d'activité de montre ce jour-là.</div>` : `<div class="empty">Connecte Strava ou Garmin pour voir ici tes activités de montre.</div><div class="btn-line"><button class="btn small primary" data-act="goto-watch">Connecter ma montre</button></div>`)}
+    </div>` : ""}
     <div class="card">
       <h3>${JOURS_LONG[fromISO(ui.selected).getDay()]} ${fromISO(ui.selected).getDate()} ${MOIS_LONG[fromISO(ui.selected).getMonth()]}</h3>
       ${dayWs.length ? dayWs.map((w) => `
@@ -768,6 +777,47 @@ function viewSport() {
           <small>${w.ex.map((e) => esc(e.t) + " ×" + e.s).join(" · ")}</small></div></div>`).join("") : `<div class="empty">Pas de séance ce jour-là.</div>`}
       ${poleOwn}
     </div>`;
+}
+// ----- Montre connectée : Strava (OAuth sur ta propre appli Strava) et Garmin (clé API personnelle) -----
+const WATCH = { strava: "Strava", garmin: "Garmin" };
+const watchOf = (p) => (state.watch || []).find((w) => w.provider === p);
+let watchBusy = false;
+async function syncWatch(provider, manual, code) {
+  if (!cloud || watchBusy) return;
+  watchBusy = true; if (manual) toast(WATCH[provider] + " : synchronisation…");
+  try {
+    const r = await fetch(`${CFG.url}/functions/v1/hevy-sync`, { method: "POST", headers: { "Content-Type": "application/json", apikey: CFG.key }, body: JSON.stringify({ token, provider, code: code || undefined, full: !!manual }) });
+    const d = await r.json();
+    if (d.ok) { lastSnap = ""; await pull(); if (manual) toast(`${WATCH[provider]} à jour (${d.count} activité${d.count > 1 ? "s" : ""})`); }
+    else if (manual) toast((d.error || "Synchronisation impossible") + (d.detail ? " — " + String(d.detail).slice(0, 90) : ""));
+  } catch (e) { if (manual) toast("Synchronisation impossible pour le moment"); }
+  watchBusy = false; if (manual) render();
+}
+const stravaRedirect = () => location.origin + location.pathname;
+const KIND_FR = { run: ["🏃", "Course"], trailrun: ["🏃", "Trail"], running: ["🏃", "Course"], treadmill_running: ["🏃", "Tapis"], ride: ["🚴", "Vélo"], virtualride: ["🚴", "Vélo"], cycling: ["🚴", "Vélo"], walk: ["🚶", "Marche"], walking: ["🚶", "Marche"], hike: ["🥾", "Randonnée"], hiking: ["🥾", "Randonnée"], swim: ["🏊", "Natation"], lap_swimming: ["🏊", "Natation"], yoga: ["🧘", "Yoga"], weighttraining: ["🏋️", "Muscu"], strength_training: ["🏋️", "Muscu"], workout: ["💪", "Séance"], hiit: ["🔥", "HIIT"], elliptical: ["🏃", "Elliptique"] };
+const kindOf = (k) => KIND_FR[String(k || "").toLowerCase()] || ["⌚", k ? k.replace(/_/g, " ") : "Activité"];
+const fmtSecs = (s) => { const m = Math.round(s / 60); return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}` : `${m} min`; };
+const fmtKm = (m) => (m / 1000).toFixed(m >= 100000 ? 0 : 1).replace(".", ",") + " km";
+function watchCard() {
+  const st = watchOf("strava"), ga = watchOf("garmin");
+  const when = (w) => w?.synced_at ? new Date(w.synced_at).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "jamais";
+  const strava = st?.linked
+    ? `<div class="wprov"><b>Strava</b> <span class="ok">connecté</span><small>dernière synchro : ${when(st)}</small>
+        <div class="btn-line"><button class="btn small primary" data-act="watch-sync" data-p="strava">Actualiser</button><button class="btn small danger" data-act="watch-remove" data-p="strava">Déconnecter</button></div></div>`
+    : `<div class="wprov"><b>Strava</b>
+        <small>1) Sur <a href="https://www.strava.com/settings/api" target="_blank" rel="noopener">strava.com/settings/api</a>, crée ton application. Mets <b>${esc(location.hostname)}</b> dans « Authorization Callback Domain ».<br>2) Recopie ici l'identifiant client et le code secret du client, puis clique sur Connecter : Strava te demandera d'autoriser.</small>
+        <input id="stId" inputmode="numeric" autocomplete="off" placeholder="ID client (un nombre)" value="${esc(st?.client_id || "")}" style="width:100%;margin:6px 0">
+        <input id="stSecret" type="password" autocomplete="off" placeholder="Code secret du client" style="width:100%;margin-bottom:6px">
+        <div class="btn-line"><button class="btn small primary" data-act="strava-save">Connecter Strava</button></div></div>`;
+  const garmin = ga?.linked
+    ? `<div class="wprov"><b>Garmin</b> <span class="ok">connecté</span><small>dernière synchro : ${when(ga)}</small>
+        <div class="btn-line"><button class="btn small primary" data-act="watch-sync" data-p="garmin">Actualiser</button><button class="btn small danger" data-act="watch-remove" data-p="garmin">Déconnecter</button></div></div>`
+    : `<div class="wprov"><b>Garmin (Forerunner…)</b>
+        <small>Sur <a href="https://connect.garmin.com/app/settings/personalApiToken" target="_blank" rel="noopener">Garmin Connect › clé API personnelle</a>, clique sur Créer une clé, choisis une durée, puis copie la clé (elle ne s'affiche qu'une fois) et colle-la ici.</small>
+        <input id="gaKey" type="password" autocomplete="off" placeholder="Colle ta clé API Garmin" style="width:100%;margin:6px 0">
+        <div class="btn-line"><button class="btn small primary" data-act="garmin-save">Connecter Garmin</button></div></div>`;
+  return `<div class="card"><h3>⌚ Montre connectée</h3>
+    <p class="muted">Tes activités (course, vélo, marche…) apparaissent dans l'onglet Sport. Synchro automatique chaque soir à 22 h, ou avec « Actualiser ».</p>${garmin}${strava}</div>`;
 }
 function hevyCard() {
   return `<div class="card"><h3>Hevy</h3>
@@ -960,7 +1010,7 @@ function viewSettings() {
         ? `<button class="btn small danger" data-act="gcal-disconnect">Déconnecter Google Agenda</button>`
         : `<button class="btn small" data-act="gcal-connect">Connecter mon Google Agenda</button>`}</div>` : ""}
     </div>
-    ${cloud ? hevyCard() + linksCard() : ""}
+    ${cloud ? hevyCard() + watchCard() + linksCard() : ""}
     ${pushCard()}
     <div class="card">
       <h3>Sauvegarde</h3>
@@ -985,26 +1035,17 @@ const sheet = $("#sheet"), sheetForm = $("#sheetForm");
 // Champ « Pour » : Nelson et Sophie peuvent remplir à la place de l'autre, ou pour le commun.
 // Les autres profils n'ont pas le choix : tout va dans leur propre calendrier.
 // Tâche : privé (juste moi) ou public (Nelson + Sophie = commun)
-const visField = () => isPair(me)
-  ? `<div class="field"><label>Visibilité</label><select id="fVis">
-      <option value="perso" ${ui.filter === "commun" ? "" : "selected"}>Privé (juste moi)</option>
-      <option value="commun" ${ui.filter === "commun" ? "selected" : ""}>Public (${esc(prof("nelson").name)} + ${esc(prof("sophie").name)})</option>
-    </select></div>`
-  : "";
-const scopeField = (forId) => isPair(me)
-  ? `<div class="field"><label>Visibilité</label><select id="fScope">
-      <option value="commun" ${!forId ? "selected" : ""}>Public (${esc(prof("nelson").name)} + ${esc(prof("sophie").name)})</option>
-      <option value="nelson" ${forId === "nelson" ? "selected" : ""}>Privé · ${esc(prof("nelson").name)}</option>
-      <option value="sophie" ${forId === "sophie" ? "selected" : ""}>Privé · ${esc(prof("sophie").name)}</option>
-    </select></div>`
-  : "";
+// Interrupteur Privé / Public (champ caché #id : valeur « public » ou « privé » lue à l'enregistrement)
+const visSwitch = (id, pub, priv, isPub) => `<div class="field"><label>Visibilité</label>
+  <input type="hidden" id="${id}" value="${isPub ? pub : priv}">
+  <button type="button" class="vsw ${isPub ? "on" : ""}" role="switch" aria-checked="${isPub}" data-act="vis-switch" data-for="${id}" data-pub="${pub}" data-priv="${priv}">
+    <span class="knob"></span><span class="vtxt">${isPub ? "👥 Public" : "🔒 Privé"}</span></button>
+  <small class="vhint">${isPub ? esc(prof("nelson").name) + " et " + esc(prof("sophie").name) + " le voient" : "Visible par toi seul"}</small></div>`;
+// Tâche : privé (juste moi) ou public (Nelson + Sophie = commun)
+const visField = () => isPair(me) ? visSwitch("fVis", "commun", "perso", ui.filter === "commun") : "";
+const scopeField = (forId) => isPair(me) ? visSwitch("fScope", "commun", forId || me, !forId) : "";
 // Modification : passer un événement de Public à Privé (toi) ou inversement
-const visEditField = (e) => (isPair(me) && (e.scope === "commun" || e.owner === me))
-  ? `<div class="field"><label>Visibilité</label><select id="fScope">
-      <option value="commun" ${e.scope === "commun" ? "selected" : ""}>Public (${esc(prof("nelson").name)} + ${esc(prof("sophie").name)})</option>
-      <option value="${me}" ${e.scope !== "commun" ? "selected" : ""}>Privé (juste moi)</option>
-    </select></div>`
-  : "";
+const visEditField = (e) => (isPair(me) && (e.scope === "commun" || e.owner === me)) ? visSwitch("fScope", "commun", me, e.scope === "commun") : "";
 // Renvoie { owner, scope } selon le choix du champ « Pour »
 function readFor() {
   const v = $("#fScope") ? $("#fScope").value : me;
@@ -1092,8 +1133,16 @@ document.addEventListener("click", (ev) => {
   if (el.classList.contains("tab")) { ui.tab = el.dataset.tab; render(true); window.scrollTo(0, 0); return; }
 
   const act = el.dataset.act;
-  if (viewing() && ["new-event", "edit-event", "del-event", "new-task", "del-task", "save-prog", "save-event", "save-task", "profile", "pole-toggle", "goal-set", "goal-save", "hevy-refresh"].includes(act)) { toast("Lecture seule : tu consultes le profil de " + (prof(ui.viewAs)?.name || "l'autre")); return; }
+  if (viewing() && ["new-event", "edit-event", "del-event", "new-task", "del-task", "save-prog", "save-event", "save-task", "profile", "pole-toggle", "goal-set", "goal-save", "hevy-refresh", "watch-sync", "watch-remove", "strava-save", "garmin-save"].includes(act)) { toast("Lecture seule : tu consultes le profil de " + (prof(ui.viewAs)?.name || "l'autre")); return; }
   switch (act) {
+    case "vis-switch": {
+      const inp = document.getElementById(el.dataset.for), pub = inp.value !== el.dataset.pub;
+      inp.value = pub ? el.dataset.pub : el.dataset.priv;
+      el.classList.toggle("on", pub); el.setAttribute("aria-checked", pub);
+      el.querySelector(".vtxt").textContent = pub ? "👥 Public" : "🔒 Privé";
+      const h = el.parentNode.querySelector(".vhint"); if (h) h.textContent = pub ? prof("nelson").name + " et " + prof("sophie").name + " le voient" : "Visible par toi seul";
+      break;
+    }
     case "pole-toggle": {
       const day = el.dataset.day, on = !hasPole(me, day);
       state.logs = (state.logs || []).filter((l) => !(l.owner === me && l.kind === "pole" && String(l.day).slice(0, 10) === day));
@@ -1176,6 +1225,29 @@ document.addEventListener("click", (ev) => {
       rpc("set_hevy_key", { p_token: token, p_key: k }).then(async () => { hevyOn = true; $("#hvKey").value = ""; render(); await syncHevy(true, true); }).catch(() => toast("Enregistrement impossible"));
       break;
     }
+    case "strava-save": {
+      const id = $("#stId").value.trim(), sec = $("#stSecret").value.trim();
+      if (!/^\d{3,10}$/.test(id) || !/^[0-9a-f]{30,50}$/i.test(sec)) { toast("ID (nombre) ou code secret Strava invalide"); break; }
+      rpc("set_watch_key", { p_token: token, p_provider: "strava", p_api_key: "", p_client_id: id, p_client_secret: sec })
+        .then(() => { location.href = "https://www.strava.com/oauth/authorize?client_id=" + id + "&response_type=code&approval_prompt=auto&scope=read,activity:read_all&state=strava&redirect_uri=" + encodeURIComponent(stravaRedirect()); })
+        .catch(() => toast("Enregistrement impossible"));
+      break;
+    }
+    case "garmin-save": {
+      const k = $("#gaKey").value.trim();
+      if (k.length < 20) { toast("Clé Garmin invalide"); break; }
+      rpc("set_watch_key", { p_token: token, p_provider: "garmin", p_api_key: k, p_client_id: "", p_client_secret: "" })
+        .then(async () => { $("#gaKey").value = ""; lastSnap = ""; await pull(); await syncWatch("garmin", true); }).catch(() => toast("Enregistrement impossible"));
+      break;
+    }
+    case "watch-sync": syncWatch(el.dataset.p, true); break;
+    case "watch-remove": {
+      const p = el.dataset.p;
+      if (!confirm("Déconnecter " + WATCH[p] + " ? Les activités copiées dans l'appli seront effacées.")) break;
+      rpc("delete_watch", { p_token: token, p_provider: p }).then(() => { state.watch = (state.watch || []).filter((w) => w.provider !== p); state.acts = (state.acts || []).filter((a) => !(a.owner === me && a.provider === p)); lastSnap = ""; render(); toast(WATCH[p] + " déconnecté"); }).catch(() => toast("Action impossible"));
+      break;
+    }
+    case "goto-watch": ui.tab = "settings"; render(true); break;
     case "hevy-sync": syncHevy(true, true); break;
     case "hevy-refresh": syncHevy(true, false); break;
     case "hevy-remove":
@@ -1379,7 +1451,7 @@ let lastSnap = "";
 async function pull() {
   try {
     const d = await rpc("get_data", { p_token: token });
-    try { d.sport = await rpc("get_sport", { p_token: token }); } catch (e) { d.sport = { goals: state.goals || [], logs: state.logs || [] }; }
+    try { d.sport = await rpc("get_sport", { p_token: token }); } catch (e) { d.sport = { goals: state.goals || [], logs: state.logs || [], watch: state.watch || [], acts: state.acts || [] }; }
     const snap = JSON.stringify(d);
     me = d.me.id; isAdmin = !!d.me.admin; gShared = !!d.me.gcal_shared; hevyOn = !!d.me.hevy; hevySyncAt = d.me.hevy_sync || null;
     const first = !loaded;
@@ -1387,7 +1459,7 @@ async function pull() {
       lastSnap = snap;
       const typing = sheet.open || document.activeElement?.matches?.("input, select"); // ne pas casser une saisie en cours
       const loc = new Map(state.tasks.filter((t) => pendingProg.has(t.id)).map((t) => [t.id, t]));
-      state.profiles = d.profiles; state.events = d.events; state.gcalShared = d.gcal || []; state.workouts = d.workouts || []; state.goals = d.sport?.goals || []; state.logs = d.sport?.logs || [];
+      state.profiles = d.profiles; state.events = d.events; state.gcalShared = d.gcal || []; state.workouts = d.workouts || []; state.goals = d.sport?.goals || []; state.logs = d.sport?.logs || []; state.watch = d.sport?.watch || []; state.acts = d.sport?.acts || [];
       // un % pas encore sauvegardé garde SA valeur locale (ma part), le reste vient de la base
       state.tasks = d.tasks.map((t) => { const l = loc.get(t.id); return l ? Object.assign({}, t, { [myField(t)]: l[myField(t)] }) : t; });
       fixColors(state.profiles);
@@ -1402,12 +1474,24 @@ async function pull() {
       alert("Session expirée : reconnecte-toi avec ton e-mail et ton code."); location.reload(); return;
     }
     if (!loaded) { // hors connexion : dernière version connue
-      try { const d = JSON.parse(localStorage.getItem(CACHE_KEY)); if (d) { me = d.me.id; isAdmin = !!d.me.admin; gShared = !!d.me.gcal_shared; state.gcalShared = d.gcal || []; state.workouts = d.workouts || []; state.goals = d.sport?.goals || []; state.logs = d.sport?.logs || []; hevyOn = !!d.me.hevy; state.profiles = d.profiles; state.events = d.events; state.tasks = d.tasks; loaded = true; render(); toast("Hors connexion : dernière version affichée"); } } catch (x) {}
+      try { const d = JSON.parse(localStorage.getItem(CACHE_KEY)); if (d) { me = d.me.id; isAdmin = !!d.me.admin; gShared = !!d.me.gcal_shared; state.gcalShared = d.gcal || []; state.workouts = d.workouts || []; state.goals = d.sport?.goals || []; state.logs = d.sport?.logs || []; state.watch = d.sport?.watch || []; state.acts = d.sport?.acts || []; hevyOn = !!d.me.hevy; state.profiles = d.profiles; state.events = d.events; state.tasks = d.tasks; loaded = true; render(); toast("Hors connexion : dernière version affichée"); } } catch (x) {}
     }
   }
 }
 function startCloud() {
-  pull();
+  pull().then(() => {
+    try { // retour de Strava après autorisation : ?code=...&scope=...&state=strava
+      const q = new URLSearchParams(location.search);
+      if (q.get("state") === "strava") {
+        const code = q.get("code"), scope = q.get("scope") || "";
+        history.replaceState(null, "", location.pathname);
+        ui.tab = "settings";
+        if (q.get("error") || !code) toast("Strava : autorisation refusée");
+        else if (!/activity:read/.test(scope)) toast("Strava : coche bien « Voir les données de tes activités » puis réessaie");
+        else syncWatch("strava", true, code);
+      }
+    } catch (e) {}
+  });
   setInterval(() => { if (!document.hidden) pull(); }, 20000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) pull(); });
 }
