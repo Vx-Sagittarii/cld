@@ -1,12 +1,13 @@
 // Service worker : met les fichiers de l'appli en cache pour qu'elle s'ouvre
 // instantanément et fonctionne hors ligne. Change CACHE à chaque mise à jour
 // pour forcer les téléphones à récupérer la nouvelle version.
-const CACHE = "iwi2me-v13";
+const CACHE = "iwi2me-v14";
 const FILES = [
   "./",
   "./index.html",
   "./style.css",
   "./app.js",
+  "./astro.js",
   "./config.js",
   "./img/scene.svg",
   "./img/scene-noel.svg",

@@ -243,6 +243,7 @@ function render(animate = false) {
   if (!loaded) { view.innerHTML = `<div class="empty">Chargement…</div>`; return; }
   if (ui.tab === "cal") view.innerHTML = viewCalendar();
   else if (ui.tab === "tasks") view.innerHTML = viewTasks();
+  else if (ui.tab === "astro") view.innerHTML = viewAstro();
   else view.innerHTML = viewSettings();
   view.classList.toggle("enter", animate);
   if (gcal.on && gcal.token && ui.tab === "cal") ensureGcal();        // cascade d'apparition seulement au changement d'onglet
@@ -584,6 +585,14 @@ async function pushOff() {
   localStorage.removeItem(PUSH_KEY); render();
 }
 
+// ----- Astro -----
+function viewAstro() {
+  if (!ui.astro) ui.astro = PAIR.includes(me) ? me : "nelson";
+  try {
+    return window.AstroView(ui.astro, { nameOf: (id) => esc(prof(id)?.name || id), colorOf: (id) => prof(id)?.color || "#fff" });
+  } catch (e) { return `<div class="empty">Astro indisponible</div>`; }
+}
+
 // ----- Réglages -----
 function viewSettings() {
   const lock = cloud && !isAdmin; // en ligne, seul l'admin gère les profils
@@ -745,6 +754,7 @@ document.addEventListener("click", (ev) => {
     case "month": ui.month = new Date(ui.month.getFullYear(), ui.month.getMonth() + Number(el.dataset.dir), 1); render(); break;
     case "today": ui.selected = toISO(new Date()); ui.month = startOfMonth(new Date()); render(); break;
     case "shift": { const d = shift(ui.period, fromISO(ui.selected), Number(el.dataset.dir)); ui.selected = toISO(d); ui.month = startOfMonth(d); render(); break; }
+    case "astro-sub": ui.astro = el.dataset.s; render(); break;
     case "period": ui.period = el.dataset.p; render(); break;
     case "new-event": openEventSheet(); break;
     case "new-task": openTaskSheet(); break;

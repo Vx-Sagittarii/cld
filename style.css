@@ -336,3 +336,12 @@ body.noel .tab.on { color: #FFB3BC; }
 
 .save-prog { margin-top: 10px; width: 100%; background: linear-gradient(135deg, var(--accent), var(--orange)); color: #fff; font-weight: 700; padding: 10px; border-radius: 12px; }
 .save-prog[hidden] { display: none; }
+
+/* ---------- Astro ---------- */
+.astro-top { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
+.astro-sym { font-size: 44px; line-height: 1; }
+.astro-row { display: flex; align-items: center; gap: 10px; font-size: 15px; }
+.astro-row > span { font-size: 26px; }
+.astro-p { margin: 10px 0 0; line-height: 1.5; font-size: 15px; }
+.astro-duo { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; text-align: center; gap: 8px; }
+.astro-heart { font-size: 28px; color: var(--accent); }
