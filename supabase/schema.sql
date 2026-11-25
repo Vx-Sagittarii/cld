@@ -1551,3 +1551,12 @@ begin
   end if;
   update profiles set name = nm where id = p_id;
 end $$;
+
+-- 24. _can_write : un événement perso ne s'écrit que par son propriétaire (l'appli l'interdisait déjà ; le serveur aussi maintenant)
+create or replace function _can_write(p_me text, p_owner text, p_scope text) returns boolean
+language sql stable as $$
+  select case
+    when p_scope = 'commun' then _samecp(p_me, p_owner)
+    else p_me = p_owner
+  end;
+$$;

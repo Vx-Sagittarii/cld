@@ -1212,7 +1212,7 @@ function viewSettings() {
       <h3>Profils</h3>
       ${rows}
       ${!lock && !cloud ? `<button class="add-btn" data-act="new-profile">+ Ajouter un profil</button>` : ""}
-      <p class="muted">${cloud && !isAdmin && !isNS(me) ? (PAIR.length > 1 ? `Ton calendrier est privé. Tu partages le calendrier « Commun » avec ${esc(prof(PAIR.find((x) => x !== me))?.name || "ton/ta partenaire")}.` : "Ton calendrier est privé : toi seul(e) y as accès.") : "Nelson et Sophie ont chacun leur calendrier et partagent le calendrier « Commun ». Les autres profils sont de simples noms avec leur propre calendrier privé."}</p>
+      <p class="muted">${cloud && !isAdmin && !isNS(me) ? (PAIR.length > 1 ? `Ton calendrier est privé. Tu partages le calendrier « Commun » avec ${esc(prof(PAIR.find((x) => x !== me))?.name || "ton/ta partenaire")}.` : "Ton calendrier est privé : toi seul(e) y as accès.") : (isAdmin ? "Nelson et Sophie ont chacun leur calendrier privé et partagent le calendrier « Commun ». Les autres personnes se gèrent dans l'administration." : "Chacun a son calendrier privé, et vous partagez le calendrier « Commun ».")}</p>
     </div>
     ${linkCard}
     ${cloud && isAdmin ? `<div class="card"><h3>Administration</h3><p class="muted">Invite de nouvelles personnes par lien et choisis ce que chacun peut utiliser.</p><div class="btn-line"><button class="btn small primary" data-act="admin-open">Gérer les invitations et les droits</button></div></div>` : ""}
