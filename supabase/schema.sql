@@ -1155,3 +1155,173 @@ revoke all on function ping(uuid), decide_profile(uuid,text,boolean), set_status
 grant execute on function ping(uuid), decide_profile(uuid,text,boolean), set_status(uuid,text,text), get_admin(uuid), login(text,text), claim_invite(uuid,text,text,text) to anon, authenticated;
 
 revoke all on function get_data(uuid) from public; grant execute on function get_data(uuid) to anon, authenticated;
+
+-- ============ Migration 17 : comptes créés par l'admin, couples d'utilisateurs ============
+
+alter table profiles add column if not exists partner text;
+
+create or replace function _cp(p_id text) returns text
+language sql stable security definer set search_path = public as $$
+  select case when p_id in ('nelson','sophie') then 'nelson+sophie'
+    else (select least(p.id, p.partner) || '+' || greatest(p.id, p.partner) from profiles p
+          where p.id = p_id and p.partner is not null and exists (select 1 from profiles q where q.id = p.partner and q.partner = p.id)) end;
+$$;
+create or replace function _samecp(a text, b text) returns boolean
+language sql stable security definer set search_path = public as $$ select _cp(a) is not null and _cp(a) = _cp(b); $$;
+create or replace function _second(p_id text) returns boolean
+language sql stable security definer set search_path = public as $$
+  select case when p_id in ('nelson','sophie') then p_id = 'sophie' else p_id = (select greatest(p.id, p.partner) from profiles p where p.id = p_id) end;
+$$;
+create or replace function _couple(p_id text) returns json
+language sql stable security definer set search_path = public as $$
+  select case when p_id in ('nelson','sophie') then '["nelson","sophie"]'::json
+    when _cp(p_id) is null then '[]'::json
+    else (select json_build_array(least(p.id, p.partner), greatest(p.id, p.partner)) from profiles p where p.id = p_id) end;
+$$;
+
+create or replace function _can_write(p_me text, p_owner text, p_scope text) returns boolean
+language sql stable as $$
+  select case
+    when p_scope = 'commun' then _samecp(p_me, p_owner)
+    else p_me = p_owner or (_samecp(p_me, p_owner))
+  end;
+$$;
+
+create or replace function _can_modify(p_me text, p_owner text, p_scope text, p_created_by text) returns boolean
+language sql stable as $$
+  select case when p_scope = 'commun' then _samecp(p_me, p_owner)
+              else p_me = p_owner or p_me = coalesce(p_created_by, p_owner) end;
+$$;
+
+create or replace function set_progress(p_token uuid, p_id text, p_value int) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token); t tasks; v int := greatest(0, least(100, coalesce(p_value, 0)));
+begin
+  select * into t from tasks where id = p_id;
+  if not found then raise exception 'introuvable'; end if;
+  if t.scope = 'commun' and _samecp(me.id, t.owner) then
+    if _second(me.id) then update tasks set progress_b = v, updated_at = now() where id = p_id;
+    else update tasks set progress = v, updated_at = now() where id = p_id; end if;
+  elsif t.owner = me.id then
+    update tasks set progress = v, updated_at = now() where id = p_id;
+  else
+    raise exception 'interdit';
+  end if;
+end $$;
+
+create or replace function get_sport(p_token uuid) returns json
+language plpgsql stable security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  return json_build_object(
+    'perms', me.perms,
+    'goals', coalesce((select json_agg(json_build_object('owner', g.profile_id, 'from', g.from_week, 'gym', g.gym, 'pole', g.pole,
+                         'targets', coalesce(g.targets, jsonb_build_object('gym', g.gym, 'pole', g.pole))))
+                       from sport_goals g where g.profile_id = me.id or (_samecp(me.id, g.profile_id))), '[]'::json),
+    'logs',  coalesce((select json_agg(json_build_object('owner', l.profile_id, 'day', l.day, 'kind', l.kind))
+                       from sport_logs l where l.day >= current_date - 400 and (l.profile_id = me.id or (_samecp(me.id, l.profile_id)))), '[]'::json),
+    'custom', coalesce((select json_agg(json_build_object('owner', c.profile_id, 'id', c.id, 'name', c.name))
+                       from sport_custom c where c.profile_id = me.id or (_samecp(me.id, c.profile_id))), '[]'::json),
+    'watch', coalesce((select json_agg(json_build_object('provider', k.provider, 'synced_at', k.synced_at, 'linked', (k.refresh_token is not null or k.api_key is not null), 'client_id', k.client_id))
+                       from watch_keys k where k.profile_id = me.id), '[]'::json),
+    'acts',  coalesce((select json_agg(json_build_object('owner', a.profile_id, 'id', a.id, 'provider', a.provider, 'day', a.day, 'title', a.title, 'kind', a.kind,
+                         'start', a.start_time, 'secs', a.secs, 'dist', a.dist_m, 'kcal', a.kcal, 'hr', a.avg_hr) order by a.start_time desc)
+                       from activities a where a.day >= current_date - 400 and (a.profile_id = me.id or (_samecp(me.id, a.profile_id)))), '[]'::json));
+end $$;
+
+create or replace function _profiles_visible(me profiles) returns json
+language sql stable security definer set search_path = public as $$
+  select coalesce(json_agg(json_build_object('id',id,'name',name,'color',color,'admin',is_admin,'links',links) order by created_at), '[]'::json)
+  from profiles where status = 'active' and (me.is_admin or id = me.id or (_samecp(me.id, id)));
+$$;
+
+create or replace function get_data(p_token uuid) returns json
+language plpgsql stable security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  return json_build_object(
+    'me', json_build_object('id', me.id, 'name', me.name, 'admin', me.is_admin, 'gcal_shared', me.gcal_shared,
+                            'hevy', exists(select 1 from hevy_keys where profile_id = me.id),
+                            'hevy_sync', (select synced_at from hevy_keys where profile_id = me.id), 'couple', _couple(me.id)),
+    'profiles', _profiles_visible(me),
+    'events', coalesce((select json_agg(json_build_object('id',id,'title',title,'date',date,'time',time,'owner',owner,'scope',scope,'meta',meta))
+                        from events where owner = me.id or (scope = 'commun' and _samecp(me.id, owner))), '[]'::json),
+    'tasks',  coalesce((select json_agg(json_build_object('id',id,'title',title,'period',period,'key',key,'progress',progress,'progress_b',progress_b,'owner',owner,'scope',scope))
+                        from tasks  where owner = me.id or (scope = 'commun' and _samecp(me.id, owner))), '[]'::json),
+    'gcal',   coalesce((select json_agg(json_build_object('id',g.id,'title',g.title,'date',g.date,'time',g.time,'owner',g.owner))
+                        from gcal_events g join profiles pr on pr.id = g.owner
+                        where _samecp(me.id, g.owner) and (g.owner = me.id or pr.gcal_shared)), '[]'::json),
+    'workouts', coalesce((select json_agg(json_build_object('id',w.id,'owner',w.profile_id,'title',w.title,'day',w.day,'start',w.start_time,'end',w.end_time,'sets',w.n_sets,'vol',w.volume,'ex',w.ex) order by w.start_time desc)
+                        from workouts w
+                        where w.day >= current_date - 400 and (w.profile_id = me.id or (_samecp(me.id, w.profile_id)))), '[]'::json)
+  );
+end $$;
+
+create or replace function get_admin(p_token uuid) returns json
+language plpgsql stable security definer set search_path = public as $$
+declare me profiles := _me(p_token); al jsonb := '[]'::jsonb; np int; r record; mb numeric;
+begin
+  if me.id is null or not me.is_admin then raise exception 'réservé à l''admin'; end if;
+  select count(*) into np from profiles where status = 'pending';
+  if np > 0 then al := al || jsonb_build_array(np || ' demande(s) de compte à valider'); end if;
+  for r in select p.name, k.synced_at from hevy_keys k join profiles p on p.id = k.profile_id where k.synced_at is null or k.synced_at < now() - interval '36 hours' loop
+    al := al || jsonb_build_array('Synchro Hevy ancienne ou jamais faite pour ' || r.name);
+  end loop;
+  for r in select p.name, k.provider from watch_keys k join profiles p on p.id = k.profile_id where (k.refresh_token is not null or k.api_key is not null) and (k.synced_at is null or k.synced_at < now() - interval '36 hours') loop
+    al := al || jsonb_build_array('Synchro ' || r.provider || ' ancienne pour ' || r.name);
+  end loop;
+  mb := round(pg_database_size(current_database()) / 1048576.0, 1);
+  if mb > 400 then al := al || jsonb_build_array('Base de données à ' || mb || ' Mo sur 500 Mo (plan gratuit)'); end if;
+  return json_build_object(
+    'alerts', al, 'db_mb', mb,
+    'users', coalesce((select json_agg(json_build_object('id', p.id, 'name', p.name, 'color', p.color, 'perms', p.perms, 'created', p.created_at, 'status', p.status,
+                         'email', p.email, 'partner', (select q.name from profiles q where q.id = p.partner), 'last_login', p.last_login, 'last_seen', p.last_seen, 'requested', p.requested_at,
+                         'n_events', (select count(*) from events e where e.owner = p.id), 'n_tasks', (select count(*) from tasks t where t.owner = p.id),
+                         'n_acts', (select count(*) from activities a where a.profile_id = p.id) + (select count(*) from workouts w where w.profile_id = p.id)) order by p.created_at)
+                       from profiles p where not _is_pair(p.id)), '[]'::json),
+    'invites', coalesce((select json_agg(json_build_object('code', code, 'label', label, 'perms', perms, 'expires', expires_at, 'used_by', used_by) order by created_at desc)
+                         from invites where used_by is null and expires_at > now()), '[]'::json));
+end $$;
+
+
+create or replace function create_account(p_token uuid, p_name text, p_login text, p_pin text) returns json
+language plpgsql security definer set search_path = public, extensions as $$
+declare me profiles := _me(p_token); nm text := left(trim(coalesce(p_name, '')), 24); lg text := lower(trim(coalesce(p_login, ''))); pid text; np profiles; pal text[] := array['#4DB8FF','#FF7AC8','#FFD54D','#B28CFF','#5EEAD4','#FF9F6B']; n int;
+begin
+  if me.id is null or not me.is_admin then raise exception 'réservé à l''admin'; end if;
+  if char_length(nm) < 2 then return json_build_object('error', 'Prénom trop court.'); end if;
+  if lg !~ '^[a-z0-9._@+-]{3,40}$' then return json_build_object('error', 'Identifiant : 3 à 40 caractères (lettres, chiffres, . _ - @).'); end if;
+  if coalesce(p_pin, '') !~ '^[0-9]{6,12}$' then return json_build_object('error', 'Le code doit faire 6 à 12 chiffres.'); end if;
+  if exists (select 1 from profiles where lower(email) = lg) then return json_build_object('error', 'Cet identifiant existe déjà.'); end if;
+  pid := coalesce(nullif(regexp_replace(lower(nm), '[^a-z0-9]', '', 'g'), ''), 'user') || '-' || substr(md5(random()::text), 1, 5);
+  select count(*) into n from profiles;
+  insert into profiles(id, name, color, email, pin_hash, perms, status) values (pid, nm, pal[1 + n % 6], lg, crypt(p_pin, gen_salt('bf')), '{}'::jsonb, 'active') returning * into np;
+  return json_build_object('id', np.id);
+end $$;
+
+create or replace function link_profiles(p_token uuid, p_a text, p_b text) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null or not me.is_admin then raise exception 'réservé à l''admin'; end if;
+  if p_a = p_b or _is_pair(p_a) or _is_pair(p_b) then raise exception 'invalide'; end if;
+  if (select count(*) from profiles where id in (p_a, p_b) and status = 'active') <> 2 then raise exception 'profil introuvable'; end if;
+  update profiles set partner = null where partner in (p_a, p_b) or id in (p_a, p_b);
+  update profiles set partner = p_b where id = p_a;
+  update profiles set partner = p_a where id = p_b;
+end $$;
+
+create or replace function unlink_profile(p_token uuid, p_a text) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null or not me.is_admin or _is_pair(p_a) then raise exception 'interdit'; end if;
+  update profiles set partner = null where id = p_a or partner = p_a;
+end $$;
+
+revoke all on function _cp(text), _samecp(text,text), _second(text), _couple(text), create_account(uuid,text,text,text), link_profiles(uuid,text,text), unlink_profile(uuid,text), _can_write(text,text,text), _can_modify(text,text,text,text),
+  set_progress(uuid,text,int), get_sport(uuid), get_data(uuid), get_admin(uuid), _profiles_visible(profiles) from public;
+grant execute on function create_account(uuid,text,text,text), link_profiles(uuid,text,text), unlink_profile(uuid,text), set_progress(uuid,text,int), get_sport(uuid), get_data(uuid), get_admin(uuid) to anon, authenticated;
+

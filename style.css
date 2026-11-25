@@ -519,3 +519,9 @@ button.chk { cursor: pointer; }
 .mbar.slim { height: 6px; margin: 2px 0 8px; }
 .acc { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; font-size: 14px; border-bottom: 1px solid var(--line); }
 .acc.off b { color: #FF9AA6; } .acc.on b { color: #3DDC97; }
+
+.brandbar { text-align: center; font-weight: 900; letter-spacing: .18em; font-size: 26px; margin: 4px 0 14px;
+  background: linear-gradient(135deg, var(--accent), var(--orange)); -webkit-background-clip: text; background-clip: text; color: transparent; user-select: none; pointer-events: none; }
+.okbox { padding: 12px 14px; margin-bottom: 10px; border-radius: 14px; background: rgba(61,220,151,.14); border: 1.5px solid #3DDC97; line-height: 1.6; }
+.card select { width: 100%; padding: 12px 14px; border-radius: 14px; border: 1.5px solid var(--line); background: #1A0D40; font-size: 16px; }
+.wkrange { display: block; margin: -4px 0 8px; }

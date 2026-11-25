@@ -13,7 +13,8 @@ const EXTRA_COLORS = ["#3D8BFF", "#F2B705", "#FF5C8A", "#1FB5E8", "#9AE04A", "#E
 // Couleurs imposées aux deux profils de base (appliquées aussi aux anciennes données et à la base)
 const BASE_COLORS = { nelson: "#FF8A3D", sophie: "#3DDC97" };
 const fixColors = (profiles) => profiles.forEach((p) => { if (BASE_COLORS[p.id]) p.color = BASE_COLORS[p.id]; });
-const PAIR = ["nelson", "sophie"]; // seuls ces deux profils partagent le calendrier commun
+let PAIR = ["nelson", "sophie"]; // le couple de l'utilisateur [premier, second] ; vide = pas de couple (mis à jour depuis la base)
+const isNS = (id) => id === "nelson" || id === "sophie"; // Nelson et Sophie : accueil illustré, accès complet
 
 const defaultState = {
   profiles: [
@@ -106,7 +107,7 @@ const colorOf = (it) => it.scope === "commun" ? (document.body.classList.contain
 const pendingProg = new Map(); // % modifiés mais pas encore sauvegardés
 const tp = (t) => t.scope === "commun" ? Math.round((t.progress + (t.progress_b || 0)) / 2) : t.progress;
 // Ma part d'une tâche : sur une tâche commune, Nelson = progress, Sophie = progress_b
-const myField = (t) => (t.scope === "commun" && me === "sophie") ? "progress_b" : "progress";
+const myField = (t) => (t.scope === "commun" && me === PAIR[1]) ? "progress_b" : "progress";
 const mine = (t) => t[myField(t)] || 0;
 const shown = (t) => persoView() ? mine(t) : tp(t); // volet Perso : seulement mon %, volet Commun : la moyenne
 const labelOf = (it) => (it.google && it.owner !== me) ? `${prof(it.owner)?.name || "L'autre"} · Google` : persoView() ? (it.scope === "commun" ? "👥 Public" : "🔒 Privé") : (it.scope === "commun" ? "Commun" : (prof(it.owner)?.name || "?"));
@@ -289,7 +290,7 @@ function viewLogin() {
   return `<div class="login-box">
     <h1>iwi2me</h1>
     <p class="muted">Connecte-toi pour retrouver ton espace.</p>
-    <div class="field"><label>E-mail</label><input id="lgMail" type="email" autocomplete="email" inputmode="email" autocapitalize="off"></div>
+    <div class="field"><label>E-mail ou identifiant</label><input id="lgMail" type="text" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
     <div class="field"><label>Code</label>
       <div class="pin-dots" id="lgDots" aria-live="polite">${pinDots()}</div>
       <div class="keypad">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `<button type="button" data-act="pin-key" data-k="${n}">${n}</button>`).join("")}
@@ -307,11 +308,11 @@ function render(animate = false) {
   if (needLogin) { view.innerHTML = viewLogin(); hero.classList.add("off"); return; }
   if (permOff(ui.tab)) { ui.tab = "cal"; toast("Cette fonction est désactivée pour ton profil. Demande à Nelson pour l'activer."); }
   document.querySelectorAll(".tab").forEach((t) => { t.classList.toggle("on", t.dataset.tab === ui.tab); t.hidden = permOff(t.dataset.tab); });
-  document.body.classList.toggle("solo", cloud && !isPair(me));
+  document.body.classList.toggle("solo", cloud && !isNS(me));
   renderHero();
   applySeason();
   if (!loaded) { view.innerHTML = `<div class="empty">Chargement…</div>`; return; }
-  if (ui.tab === "cal") view.innerHTML = banners() + viewCalendar();
+  if (ui.tab === "cal") view.innerHTML = (cloud && !isNS(me) ? `<div class="brandbar" aria-hidden="true">IWI2ME</div>` : "") + banners() + viewCalendar();
   else if (ui.tab === "tasks") view.innerHTML = viewTasks();
   else if (ui.tab === "sport") view.innerHTML = viewSport();
   else if (ui.tab === "astro") view.innerHTML = viewAstro();
@@ -319,7 +320,7 @@ function render(animate = false) {
   document.body.classList.toggle("viewing", viewing() && (ui.tab === "cal" || ui.tab === "tasks"));
   view.classList.toggle("enter", animate);
   if (gcal.on && gcal.token && ui.tab === "cal") ensureGcal();        // cascade d'apparition seulement au changement d'onglet
-  hero.classList.toggle("off", ui.tab !== "cal" || (cloud && !isPair(me))); // le bandeau photo n'apparaît que sur le calendrier
+  hero.classList.toggle("off", ui.tab !== "cal" || (cloud && !isNS(me))); // le bandeau photo n'apparaît que sur le calendrier
 }
 
 
@@ -587,7 +588,7 @@ function viewCalendar() {
       <div class="row">
         <div class="bar-owner" style="background:${colorOf(t)}"></div>
         <div class="t"><b>${esc(t.title)}</b><small>${esc(labelOf(t))}</small></div>
-        <div class="time">${persoView() ? mine(t) + "%" : t.scope === "commun" ? `${prof("nelson")?.name[0] || "N"} ${t.progress}% · ${prof("sophie")?.name[0] || "S"} ${t.progress_b || 0}%` : t.progress + "%"}</div>
+        <div class="time">${persoView() ? mine(t) + "%" : t.scope === "commun" ? `${prof(PAIR[0])?.name[0] || "A"} ${t.progress}% · ${prof(PAIR[1])?.name[0] || "B"} ${t.progress_b || 0}%` : t.progress + "%"}</div>
       </div>`).join("")}</div>` : ""}
 
     ${sportCard()}`;
@@ -614,7 +615,7 @@ async function syncHevy(manual, full) {
 }
 
 // ----- Objectif sport : jours de salle (Hevy) et de pole dance (saisis à la main) par semaine -----
-const permOff = (k) => cloud && !isPair(me) && !isAdmin && (state.perms || {})[k] === false;
+const permOff = (k) => cloud && !isNS(me) && !isAdmin && (state.perms || {})[k] === false;
 const weekMon = (iso) => toISO(mondayOf(fromISO(iso)));
 const goalFor = (who, mon) => (state.goals || []).filter((g) => g.owner === who && String(g.from).slice(0, 10) <= mon).sort((a, b) => (a.from < b.from ? 1 : -1))[0] || null;
 // Types d'activités suivies : salle (Hevy, automatique), course (montre ou saisie), pole dance (saisie) + activités perso nommées
@@ -667,7 +668,7 @@ function sportGoalCard(who) {
   const last = hist.find((h) => h.m === toISO(addDays(fromISO(mon), -7)));
   const lastTxt = last ? `<div class="lastweek ${last.r.ok ? "ok" : "ko"}">Semaine dernière : ${last.r.ok ? "objectif réussi ✓" : "objectif manqué"} <small>(${esc(sumTxt(last.r))})</small></div>` : "";
   const chips = hist.length ? `<div class="hist">${hist.reverse().map((h) => `<span class="hc ${h.r.ok ? "ok" : "ko"}" title="Semaine du ${dm(h.m)} : ${esc(sumTxt(h.r))}"><b>${h.r.ok ? "✓" : "✗"}</b><i>${dm(h.m)}</i></span>`).join("")}</div>` : "";
-  return `<div class="card goalcard"><h3>🎯 Objectif sport · ${esc(p?.name || "")}</h3>${body}${lastTxt}${chips}
+  return `<div class="card goalcard"><h3>🎯 Objectif sport de la semaine · ${esc(p?.name || "")}</h3><small class="muted wkrange">Du ${dm(mon)} au ${dm(toISO(addDays(fromISO(mon), 6)))}</small>${body}${lastTxt}${chips}
     ${own ? `<div class="btn-line"><button class="btn small" data-act="goto-goal">${st.has ? "Modifier mon objectif" : "Définir mon objectif"}</button></div>` : ""}</div>`;
 }
 // Éditeur de l'objectif (onglet Tâches) : « x / 7 jours » pour chaque activité, + activités perso
@@ -699,7 +700,7 @@ function chkRow(label, done, opts) {
   return `<div class="chk auto ${done ? "on" : ""}">${box}${body}</div>`;
 }
 const actLink = (a) => a.provider === "strava" ? `https://www.strava.com/activities/${String(a.id).replace(/^strava:/, "")}` : a.provider === "garmin" ? `https://connect.garmin.com/modern/activity/${String(a.id).replace(/^garmin:/, "")}` : "";
-function sportCard() {
+function sportCard(inTab) {
   const pair = state.profiles.filter((p) => isPair(p.id));
   const who = viewing() ? ui.viewAs : me, own = who === me && !viewing(), day = ui.selected;
   const wp = prof(who);
@@ -717,7 +718,7 @@ function sportCard() {
     const wa = k === "run" ? myA.filter((a) => RUN_RE.test(String(a.kind || "").toLowerCase())) : [];
     wa.forEach((a) => used.add(a.id));
     if (wa.length) {
-      const det = wa.map((a) => { const u = actLink(a), t = `${kindOf(a.kind)[0]} ${esc(a.title || kindOf(a.kind)[1])}`; return `${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${t} ↗ ${esc(WATCH[a.provider] || "")}</a>` : t} · ${[a.secs ? fmtSecs(a.secs) : "", a.dist ? fmtKm(a.dist) : "", a.hr ? a.hr + " bpm" : ""].filter(Boolean).join(" · ")}`; });
+      const det = wa.map((a) => { const u = actLink(a), t = `${kindOf(a.kind)[0]} ${esc(a.title || kindOf(a.kind)[1])}`; return `${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${t} ↗ ${esc(WATCH[a.provider] || "")}</a>` : t} · ${[a.secs ? fmtSecs(a.secs) : "", a.dist ? fmtKm(a.dist) : "", a.dist && a.secs ? fmtSpd(a.dist, a.secs) : "", a.hr ? a.hr + " bpm" : ""].filter(Boolean).join(" · ")}`; });
       return chkRow(label, true, { details: det });
     }
     const on = hasLog(who, day, k);
@@ -726,7 +727,7 @@ function sportCard() {
   // autres activités de montre du jour (vélo, marche…) : cochées automatiquement
   myA.filter((a) => !used.has(a.id)).forEach((a) => {
     const [ic, nm] = kindOf(a.kind), u = actLink(a), t = `${ic} ${esc(a.title || nm)}`;
-    rows.push(chkRow(nm, true, { details: [`${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${t} ↗ ${esc(WATCH[a.provider] || "")}</a>` : t} · ${[a.secs ? fmtSecs(a.secs) : "", a.dist ? fmtKm(a.dist) : "", a.hr ? a.hr + " bpm" : ""].filter(Boolean).join(" · ")}`] }));
+    rows.push(chkRow(nm, true, { details: [`${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${t} ↗ ${esc(WATCH[a.provider] || "")}</a>` : t} · ${[a.secs ? fmtSecs(a.secs) : "", a.dist ? fmtKm(a.dist) : "", a.dist && a.secs ? fmtSpd(a.dist, a.secs) : "", a.hr ? a.hr + " bpm" : ""].filter(Boolean).join(" · ")}`] }));
   });
   // séances Hevy de l'autre membre du couple (consultation)
   const other = !viewing() ? (state.workouts || []).filter((w) => w.owner !== me && isPair(w.owner) && w.day === day) : [];
@@ -734,9 +735,9 @@ function sportCard() {
   const ago = hevySyncAt ? new Date(hevySyncAt).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
   const refresh = (hevyOn || (state.watch || []).some((w) => w.linked)) && own ? `<button class="btn small" data-act="hevy-refresh">↻ Actualiser mes séances</button>` : "";
   const hint = !hevyOn && own && !(state.watch || []).length ? `<small class="muted">Connecte Hevy ou ta montre dans Réglages pour que les séances se cochent toutes seules.</small>` : "";
-  return `<div class="card"><h3>Sport${wp && viewing() ? " · " + esc(wp.name) : ""}</h3>
+  return `<div class="card"><h3>${inTab ? JOURS_LONG[fromISO(day).getDay()] + " " + fromISO(day).getDate() + " " + MOIS_LONG[fromISO(day).getMonth()] : "Sport"}${wp && viewing() ? " · " + esc(wp.name) : ""}</h3>
     <div class="chks">${rows.join("")}</div>${oHtml}${hint}
-    ${refresh ? `<div class="btn-line" style="margin-top:8px">${refresh}</div>` : ""}${refresh && ago ? `<small class="muted">Mis à jour ${ago}</small>` : ""}</div>${cloud && !permOff("sport") ? sportGoalCard(who) : ""}`;
+    ${refresh ? `<div class="btn-line" style="margin-top:8px">${refresh}</div>` : ""}${refresh && ago ? `<small class="muted">Mis à jour ${ago}</small>` : ""}</div>${cloud && !permOff("sport") && !inTab ? sportGoalCard(who) : ""}`;
 }
 
 // ----- Onglet Sport : séances Hevy du mois (par personne) -----
@@ -856,18 +857,11 @@ function viewSport() {
         : `<div class="empty">${noMuscle ? "Les muscles apparaissent après « Actualiser » (accueil ou Réglages › Hevy)." : ui.bodyP === "week" ? "Pas de séance cette semaine." : "Pas encore de séance ce mois-ci."}</div>`}
     </div>
     ${(actsM.length || dayActs.length || watchLinked || (who === me && !viewing())) ? `<div class="card"><h3>⌚ Montre connectée</h3>
-      ${actsM.length ? `<div class="spstats" style="--c:${p?.color || "#A45CFF"};margin-bottom:10px"><div><b>${actsM.length}</b><span>activité${actsM.length > 1 ? "s" : ""}</span></div><div><b>${fmtKm(actsM.reduce((t, a) => t + (a.dist || 0), 0))}</b><span>parcourus</span></div><div><b>${fmtSecs(actsM.reduce((t, a) => t + (a.secs || 0), 0))}</b><span>d'effort</span></div></div>` : ""}
-      ${dayActs.length ? dayActs.map((a) => { const [ic, nm] = kindOf(a.kind); return `<div class="row"><div class="bar-owner" style="background:${p?.color || "#888"}"></div><div class="t"><b>${ic} ${esc(a.title || nm)}</b><small>${[nm, a.secs ? fmtSecs(a.secs) : "", a.dist ? fmtKm(a.dist) : "", a.hr ? a.hr + " bpm" : "", a.kcal ? a.kcal + " kcal" : "", WATCH[a.provider]].filter(Boolean).join(" · ")}</small></div></div>`; }).join("")
+      ${actsM.length ? `<div class="spstats" style="--c:${p?.color || "#A45CFF"};margin-bottom:10px"><div><b>${actsM.length}</b><span>activité${actsM.length > 1 ? "s" : ""}</span></div><div><b>${fmtKm(actsM.reduce((t, a) => t + (a.dist || 0), 0))}</b><span>parcourus</span></div><div><b>${fmtSecs(actsM.reduce((t, a) => t + (a.secs || 0), 0))}</b><span>d'effort</span></div>${(() => { const d = actsM.reduce((t, a) => t + (a.dist || 0), 0), q = actsM.filter((a) => a.dist).reduce((t, a) => t + (a.secs || 0), 0); return d && q ? `<div><b>${(d / q * 3.6).toFixed(1).replace(".", ",")}</b><span>km/h moy.</span></div>` : ""; })()}</div>` : ""}
+      ${dayActs.length ? dayActs.map((a) => { const [ic, nm] = kindOf(a.kind); return `<div class="row"><div class="bar-owner" style="background:${p?.color || "#888"}"></div><div class="t"><b>${ic} ${esc(a.title || nm)}</b><small>${[nm, a.secs ? fmtSecs(a.secs) : "", a.dist ? fmtKm(a.dist) : "", a.dist && a.secs ? fmtSpd(a.dist, a.secs) : "", a.hr ? a.hr + " bpm" : "", a.kcal ? a.kcal + " kcal" : "", WATCH[a.provider]].filter(Boolean).join(" · ")}</small></div></div>`; }).join("")
         : (watchLinked || actsM.length ? `<div class="empty">Pas d'activité de montre ce jour-là.</div>` : `<div class="empty">Connecte Strava ou Garmin pour voir ici tes activités de montre.</div><div class="btn-line"><button class="btn small primary" data-act="goto-watch">Connecter ma montre</button></div>`)}
     </div>` : ""}
-    <div class="card">
-      <h3>${JOURS_LONG[fromISO(ui.selected).getDay()]} ${fromISO(ui.selected).getDate()} ${MOIS_LONG[fromISO(ui.selected).getMonth()]}</h3>
-      ${dayWs.length ? dayWs.map((w) => `
-        <div class="row"><div class="bar-owner" style="background:${p?.color || "#888"}"></div>
-          <div class="t"><b>🏋️ ${esc(w.title)}</b><small>${[fmtDur(w.start, w.end), w.ex.length + (w.ex.length > 1 ? " exos" : " exo"), w.sets + (w.sets > 1 ? " séries" : " série"), w.vol ? fmtVol(w.vol) : ""].filter(Boolean).join(" · ")}</small>
-          <small>${w.ex.map((e) => esc(e.t) + " ×" + e.s).join(" · ")}</small></div></div>`).join("") : `<div class="empty">Pas de séance ce jour-là.</div>`}
-      ${poleOwn}
-    </div>`;
+    ${sportCard(true)}`;
 }
 // ----- Montre connectée : Strava (OAuth sur ta propre appli Strava) et Garmin (clé API personnelle) -----
 const WATCH = { strava: "Strava", garmin: "Garmin" };
@@ -888,6 +882,7 @@ const stravaRedirect = () => location.origin + location.pathname;
 const KIND_FR = { run: ["🏃", "Course"], trailrun: ["🏃", "Trail"], running: ["🏃", "Course"], treadmill_running: ["🏃", "Tapis"], ride: ["🚴", "Vélo"], virtualride: ["🚴", "Vélo"], cycling: ["🚴", "Vélo"], walk: ["🚶", "Marche"], walking: ["🚶", "Marche"], hike: ["🥾", "Randonnée"], hiking: ["🥾", "Randonnée"], swim: ["🏊", "Natation"], lap_swimming: ["🏊", "Natation"], yoga: ["🧘", "Yoga"], weighttraining: ["🏋️", "Muscu"], strength_training: ["🏋️", "Muscu"], workout: ["💪", "Séance"], hiit: ["🔥", "HIIT"], elliptical: ["🏃", "Elliptique"] };
 const kindOf = (k) => KIND_FR[String(k || "").toLowerCase()] || ["⌚", k ? k.replace(/_/g, " ") : "Activité"];
 const fmtSecs = (s) => { const m = Math.round(s / 60); return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}` : `${m} min`; };
+const fmtSpd = (m, s) => (m / s * 3.6).toFixed(1).replace(".", ",") + " km/h";
 const fmtKm = (m) => (m / 1000).toFixed(m >= 100000 ? 0 : 1).replace(".", ",") + " km";
 function watchCard() {
   const st = watchOf("strava"), ga = watchOf("garmin");
@@ -950,7 +945,7 @@ function viewTasks() {
     <div class="card overall">
       <div class="ring" id="ring" style="--p:${avg}"><span id="ringTxt">${avg}%</span></div>
       <div class="t"><b>Avancement ${ui.period === "day" ? "du jour" : ui.period === "week" ? "de la semaine" : ui.period === "month" ? "du mois" : "de l'année"}</b>
-      <small>${list.length ? `${list.length} tâche${list.length > 1 ? "s" : ""}` : "Aucune tâche pour l'instant"}</small></div>
+      <small>${list.length ? `<b style="display:inline">${list.filter((t) => shown(t) >= 100).length}/${list.length}</b> tâche${list.length > 1 ? "s" : ""} terminée${list.filter((t) => shown(t) >= 100).length > 1 ? "s" : ""}` : "Aucune tâche pour l'instant"}</small></div>
     </div>
 
     <div class="card">
@@ -967,8 +962,8 @@ function viewTasks() {
             ${two ? "" : `<span class="pct" data-w="${w1}">${mine(t)}%</span>`}
             <button class="del" data-act="del-task" data-id="${t.id}" aria-label="Supprimer">×</button>
           </div>
-          ${two ? [["nelson", "a", t.progress], ["sophie", "b", t.progress_b || 0]].map(([id, w, v]) => `
-            <div class="who"><span style="color:${prof(id)?.color}">${esc(prof(id)?.name || id)}${(me === "sophie") === (w === "b") ? " (toi)" : ""}</span><span class="pct" data-w="${w}">${v}%</span></div>${sl(v, w, prof(id)?.color, (me === "sophie") !== (w === "b"))}`).join("")
+          ${two ? [[PAIR[0], "a", t.progress], [PAIR[1], "b", t.progress_b || 0]].map(([id, w, v]) => `
+            <div class="who"><span style="color:${prof(id)?.color}">${esc(prof(id)?.name || id)}${(me === PAIR[1]) === (w === "b") ? " (toi)" : ""}</span><span class="pct" data-w="${w}">${v}%</span></div>${sl(v, w, prof(id)?.color, (me === PAIR[1]) !== (w === "b"))}`).join("")
             : sl(mine(t), w1, colorOf(t))}
           <button class="btn small save-prog" data-act="save-prog" data-id="${t.id}" ${pendingProg.has(t.id) ? "" : "hidden"}>Sauvegarder</button>
         </div>`; }).join("") || `<div class="empty">Ajoute une première tâche.</div>`}
@@ -1082,9 +1077,9 @@ function viewAdmin() {
       <small class="muted">${esc(u.email || "")} · demandé ${ago(u.requested)} · ${PERM_DEFS.filter(([k]) => (u.perms || {})[k] === false).map(([, l]) => "sans " + l.replace(/^\S+\s/, "")).join(", ") || "tous les droits"}</small>
       <div class="btn-line"><button class="btn small primary" data-act="acc-ok" data-id="${u.id}">Accepter</button><button class="btn small danger" data-act="acc-no" data-id="${u.id}">Refuser</button></div></div>`).join("");
   const users = ad.users.filter((u) => u.status !== "pending").map((u) => `<div class="usr ${u.status === "blocked" ? "blocked" : ""}"><div class="usr-h"><i class="dot-lg" style="background:${u.color}"></i><b>${esc(u.name)}</b>${u.status === "blocked" ? ` <span class="tag-admin">suspendu</span>` : ""}<button class="del" data-act="del-profile" data-id="${u.id}" aria-label="Supprimer">×</button></div>
-      <small class="muted">${esc(u.email || "")} · vu ${ago(u.last_seen)} · ${u.n_events} événement${u.n_events > 1 ? "s" : ""}, ${u.n_tasks} tâche${u.n_tasks > 1 ? "s" : ""}, ${u.n_acts} séance${u.n_acts > 1 ? "s" : ""}</small>
+      <small class="muted">${esc(u.email || "")}${u.partner ? ` · 👥 lié(e) à ${esc(u.partner)}` : ""} · vu ${ago(u.last_seen)} · ${u.n_events} événement${u.n_events > 1 ? "s" : ""}, ${u.n_tasks} tâche${u.n_tasks > 1 ? "s" : ""}, ${u.n_acts} séance${u.n_acts > 1 ? "s" : ""}</small>
       ${PERM_DEFS.map(([k, l]) => permRow((u.perms || {})[k] !== false, `data-act="perm-toggle" data-id="${u.id}" data-k="${k}"`, l)).join("")}
-      <div class="btn-line"><button class="btn small ${u.status === "blocked" ? "primary" : "danger"}" data-act="usr-status" data-id="${u.id}" data-s="${u.status === "blocked" ? "active" : "blocked"}">${u.status === "blocked" ? "Rétablir l'accès" : "Suspendre l'accès"}</button></div></div>`).join("");
+      <div class="btn-line">${u.partner ? `<button class="btn small" data-act="lnk-del" data-id="${u.id}">Délier</button>` : ""}<button class="btn small ${u.status === "blocked" ? "primary" : "danger"}" data-act="usr-status" data-id="${u.id}" data-s="${u.status === "blocked" ? "active" : "blocked"}">${u.status === "blocked" ? "Rétablir l'accès" : "Suspendre l'accès"}</button></div></div>`).join("");
   const alertsHtml = (ad.alerts || []).length ? `<div class="card alertcard"><h3>⚠️ À surveiller</h3>${ad.alerts.map((x) => `<div class="al">${esc(x)}</div>`).join("")}</div>` : `<div class="card"><h3>✅ Tout va bien</h3><small class="muted">Synchros à jour · base de données : ${ad.db_mb ?? "?"} Mo sur 500 Mo.</small></div>`;
   return `<div class="head"><div><h1>Administration</h1><div class="sub">Accès, invitations et droits</div></div><button class="btn small" data-act="admin-close">← Réglages</button></div>
     ${alertsHtml}
@@ -1095,6 +1090,17 @@ function viewAdmin() {
       ${PERM_DEFS.map(([k, l]) => permRow(dp[k] !== false, `data-act="inv-perm" data-k="${k}"`, l)).join("")}
       <div class="btn-line"><button class="btn small primary" data-act="inv-create">Créer le lien d'invitation</button></div>
       ${invs ? `<h4 class="subh">Invitations en attente</h4>${invs}` : ""}</div>
+    <div class="card"><h3>Créer un compte</h3>
+      <p class="muted">Pour quelqu'un qui n'a pas de lien : tu choisis son identifiant et son code (6 à 12 chiffres). Il aura son espace perso, sans accès à celui de Nelson et Sophie.</p>
+      ${ui.newAcc ? `<div class="okbox">✅ Compte créé pour <b>${esc(ui.newAcc.name)}</b><br>Identifiant : <b>${esc(ui.newAcc.login)}</b> · Code : <b>${esc(ui.newAcc.pin)}</b><br><small>Note-le maintenant : le code ne sera plus affiché.</small></div>` : ""}
+      <input id="acName" maxlength="24" placeholder="Prénom (ex. Marie)" autocomplete="off">
+      <input id="acLogin" maxlength="40" placeholder="Identifiant (ex. marie.d)" autocomplete="off" autocapitalize="off" style="margin-top:8px">
+      <input id="acPin" maxlength="12" inputmode="numeric" placeholder="Code (6 à 12 chiffres)" autocomplete="off" style="margin-top:8px">
+      <p class="lg-err" id="acErr"></p>
+      <div class="btn-line"><button class="btn small primary" data-act="acc-create">Créer le compte</button></div></div>
+    <div class="card"><h3>Lier deux personnes</h3>
+      <p class="muted">Deux personnes liées voient ensemble un calendrier « Commun » et leurs objectifs, comme Nelson et Sophie, mais entre elles seulement.</p>
+      ${(() => { const act = ad.users.filter((u) => u.status === "active"); return act.length < 2 ? `<div class="empty">Il faut au moins deux profils actifs.</div>` : `<select id="lkA">${act.map((u) => `<option value="${u.id}">${esc(u.name)}</option>`).join("")}</select><select id="lkB" style="margin-top:8px">${act.map((u, i) => `<option value="${u.id}" ${i === 1 ? "selected" : ""}>${esc(u.name)}</option>`).join("")}</select><div class="btn-line"><button class="btn small primary" data-act="lnk-do">Lier ces deux personnes</button></div>`; })()}</div>
     <div class="card"><h3>Profils invités et accès</h3>
       <p class="muted">Ce que chacun peut utiliser. Chacun ne voit que ses propres données ; seuls Nelson et Sophie partagent le calendrier commun.</p>
       ${users || `<div class="empty">Aucun profil invité pour l'instant.</div>`}</div>`;
@@ -1122,7 +1128,7 @@ function viewSettings() {
       <h3>Profils</h3>
       ${rows}
       ${!lock ? `<button class="add-btn" data-act="new-profile">+ Ajouter un profil</button>` : ""}
-      <p class="muted">${cloud && !isAdmin && !PAIR.includes(me) ? "Ton calendrier est privé : toi seul(e) y as accès." : "Nelson et Sophie ont chacun leur calendrier et partagent le calendrier « Commun ». Les autres profils sont de simples noms avec leur propre calendrier privé."}</p>
+      <p class="muted">${cloud && !isAdmin && !isNS(me) ? (PAIR.length > 1 ? `Ton calendrier est privé. Tu partages le calendrier « Commun » avec ${esc(prof(PAIR.find((x) => x !== me))?.name || "ton/ta partenaire")}.` : "Ton calendrier est privé : toi seul(e) y as accès.") : "Nelson et Sophie ont chacun leur calendrier et partagent le calendrier « Commun ». Les autres profils sont de simples noms avec leur propre calendrier privé."}</p>
     </div>
     ${linkCard}
     ${cloud && isAdmin ? `<div class="card"><h3>Administration</h3><p class="muted">Invite de nouvelles personnes par lien et choisis ce que chacun peut utiliser.</p><div class="btn-line"><button class="btn small primary" data-act="admin-open">Gérer les invitations et les droits</button></div></div>` : ""}
@@ -1164,7 +1170,7 @@ const visSwitch = (id, pub, priv, isPub) => `<div class="field"><label>Visibilit
   <input type="hidden" id="${id}" value="${isPub ? pub : priv}">
   <button type="button" class="vsw ${isPub ? "on" : ""}" role="switch" aria-checked="${isPub}" data-act="vis-switch" data-for="${id}" data-pub="${pub}" data-priv="${priv}">
     <span class="knob"></span><span class="vtxt">${isPub ? "👥 Public" : "🔒 Privé"}</span></button>
-  <small class="vhint">${isPub ? esc(prof("nelson").name) + " et " + esc(prof("sophie").name) + " le voient" : "Visible par toi seul"}</small></div>`;
+  <small class="vhint">${isPub ? esc(prof(PAIR[0])?.name || "") + " et " + esc(prof(PAIR[1])?.name || "") + " le voient" : "Visible par toi seul"}</small></div>`;
 // Tâche : privé (juste moi) ou public (Nelson + Sophie = commun)
 const visField = () => isPair(me) ? visSwitch("fVis", "commun", "perso", ui.filter === "commun") : "";
 const scopeField = (forId) => isPair(me) ? visSwitch("fScope", "commun", forId || me, !forId) : "";
@@ -1264,11 +1270,11 @@ document.addEventListener("click", (ev) => {
       inp.value = pub ? el.dataset.pub : el.dataset.priv;
       el.classList.toggle("on", pub); el.setAttribute("aria-checked", pub);
       el.querySelector(".vtxt").textContent = pub ? "👥 Public" : "🔒 Privé";
-      const h = el.parentNode.querySelector(".vhint"); if (h) h.textContent = pub ? prof("nelson").name + " et " + prof("sophie").name + " le voient" : "Visible par toi seul";
+      const h = el.parentNode.querySelector(".vhint"); if (h) h.textContent = pub ? (prof(PAIR[0])?.name || "") + " et " + (prof(PAIR[1])?.name || "") + " le voient" : "Visible par toi seul";
       break;
     }
     case "admin-open": ui.admin = true; render(true); loadAdmin(); break;
-    case "admin-close": ui.admin = false; render(true); break;
+    case "admin-close": ui.admin = false; ui.newAcc = null; render(true); break;
     case "inv-perm": ui.invPerms = ui.invPerms || { tasks: true, sport: true, astro: true, integrations: true }; ui.invPerms[el.dataset.k] = ui.invPerms[el.dataset.k] === false; render(); break;
     case "inv-create": {
       const perms = {}; PERM_DEFS.forEach(([k]) => { perms[k] = (ui.invPerms || {})[k] !== false; });
@@ -1283,6 +1289,28 @@ document.addEventListener("click", (ev) => {
       if (!confirm("Annuler cette invitation ? Le lien ne fonctionnera plus.")) break;
       rpc("revoke_invite", { p_token: token, p_code: el.dataset.code }).then(() => { toast("Invitation annulée"); loadAdmin(); }).catch(() => toast("Action impossible"));
       break;
+    case "acc-create": {
+      const nm = $("#acName").value.trim(), lg = $("#acLogin").value.trim(), pin = $("#acPin").value.trim(), er = $("#acErr");
+      er.textContent = "";
+      if (nm.length < 2 || lg.length < 3) { er.textContent = "Saisis un prénom et un identifiant (3 caractères minimum)."; break; }
+      if (!/^\d{6,12}$/.test(pin)) { er.textContent = "Le code doit faire 6 à 12 chiffres."; break; }
+      el.disabled = true;
+      rpc("create_account", { p_token: token, p_name: nm, p_login: lg, p_pin: pin }).then((r) => {
+        if (r?.error) { er.textContent = r.error; el.disabled = false; return; }
+        ui.newAcc = { name: nm, login: lg.toLowerCase(), pin }; loadAdmin(); toast("Compte créé");
+      }).catch(() => { er.textContent = "Création impossible."; el.disabled = false; });
+      break;
+    }
+    case "lnk-do": {
+      const a = $("#lkA").value, b = $("#lkB").value; if (a === b) { toast("Choisis deux personnes différentes"); break; }
+      rpc("link_profiles", { p_token: token, p_a: a, p_b: b }).then(() => { toast("Personnes liées 👥"); loadAdmin(); }).catch(() => toast("Action impossible"));
+      break;
+    }
+    case "lnk-del": {
+      if (!confirm("Délier ces deux personnes ? Elles ne verront plus le calendrier commun l'une de l'autre.")) break;
+      rpc("unlink_profile", { p_token: token, p_a: el.dataset.id }).then(() => { toast("Liaison supprimée"); loadAdmin(); }).catch(() => toast("Action impossible"));
+      break;
+    }
     case "ban-x": (ui.banDis || (ui.banDis = {}))[el.dataset.k] = true; render(); break;
     case "admin-open-tab": ui.tab = "settings"; ui.admin = true; render(true); loadAdmin(); break;
     case "acc-ok": case "acc-no": {
@@ -1354,6 +1382,7 @@ document.addEventListener("click", (ev) => {
     case "goto-goal": ui.tab = "tasks"; render(true); setTimeout(() => document.getElementById("sport-goal")?.scrollIntoView({ behavior: "smooth", block: "center" }), 80); break;
     case "view-as": ui.viewAs = el.dataset.id === me ? null : el.dataset.id; render(); break;
     case "pick": ui.selected = el.dataset.date; render(); break;
+    case "body-p": ui.bodyP = el.dataset.v === "week" ? "week" : "month"; render(); break;
     case "month": ui.month = new Date(ui.month.getFullYear(), ui.month.getMonth() + Number(el.dataset.dir), 1); render(); break;
     case "today": ui.selected = toISO(new Date()); ui.month = startOfMonth(new Date()); render(); break;
     case "shift": { const d = shift(ui.period, fromISO(ui.selected), Number(el.dataset.dir)); ui.selected = toISO(d); ui.month = startOfMonth(d); render(); break; }
@@ -1657,6 +1686,7 @@ async function pull() {
     try { d.sport = await rpc("get_sport", { p_token: token }); } catch (e) { d.sport = { goals: state.goals || [], logs: state.logs || [], watch: state.watch || [], acts: state.acts || [], custom: state.custom || [], perms: state.perms || {} }; }
     if (inflight) return; // une écriture a démarré pendant la lecture : on garde l'état local
     const snap = JSON.stringify(d);
+    if (Array.isArray(d.me.couple)) PAIR = d.me.couple;
     me = d.me.id; isAdmin = !!d.me.admin; gShared = !!d.me.gcal_shared; hevyOn = !!d.me.hevy; hevySyncAt = d.me.hevy_sync || null;
     const first = !loaded;
     if (Date.now() - lastPing > 300000) { lastPing = Date.now(); rpc("ping", { p_token: token }).catch(() => {}); }
@@ -1686,7 +1716,7 @@ async function pull() {
       alert("Session expirée : reconnecte-toi avec ton e-mail et ton code."); location.reload(); return;
     }
     if (!loaded) { // hors connexion : dernière version connue
-      try { const d = JSON.parse(localStorage.getItem(CACHE_KEY)); if (d) { me = d.me.id; isAdmin = !!d.me.admin; gShared = !!d.me.gcal_shared; state.gcalShared = d.gcal || []; state.workouts = d.workouts || []; state.goals = d.sport?.goals || []; state.logs = d.sport?.logs || []; state.watch = d.sport?.watch || []; state.acts = d.sport?.acts || []; state.custom = d.sport?.custom || []; state.perms = d.sport?.perms || {}; hevyOn = !!d.me.hevy; state.profiles = d.profiles; state.events = d.events; state.tasks = d.tasks; loaded = true; render(); toast("Hors connexion : dernière version affichée"); } } catch (x) {}
+      try { const d = JSON.parse(localStorage.getItem(CACHE_KEY)); if (d) { if (Array.isArray(d.me.couple)) PAIR = d.me.couple; me = d.me.id; isAdmin = !!d.me.admin; gShared = !!d.me.gcal_shared; state.gcalShared = d.gcal || []; state.workouts = d.workouts || []; state.goals = d.sport?.goals || []; state.logs = d.sport?.logs || []; state.watch = d.sport?.watch || []; state.acts = d.sport?.acts || []; state.custom = d.sport?.custom || []; state.perms = d.sport?.perms || {}; hevyOn = !!d.me.hevy; state.profiles = d.profiles; state.events = d.events; state.tasks = d.tasks; loaded = true; render(); toast("Hors connexion : dernière version affichée"); } } catch (x) {}
     }
   }
 }
