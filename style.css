@@ -421,3 +421,32 @@ body.viewing .task input[type=range] { pointer-events: none; opacity: .55; }
 .mbar { height: 10px; background: rgba(255,255,255,.07); border-radius: 6px; overflow: hidden; }
 .mbar i { display: block; height: 100%; background: linear-gradient(90deg, var(--c), rgba(255,255,255,.35)); border-radius: 6px; }
 .mrow em { font-style: normal; font-size: 11px; opacity: .75; text-align: right; }
+
+
+/* Objectif sport */
+.grow { display: grid; grid-template-columns: 112px 1fr 64px; align-items: center; gap: 8px; margin: 8px 0; font-size: 13px; }
+.grow em { font-style: normal; font-size: 12px; text-align: right; opacity: .85; } .grow em.ok { color: #3DDC97; opacity: 1; font-weight: 700; }
+.goalcard .muted { display: block; margin-top: 6px; }
+.lastweek { margin-top: 10px; padding: 8px 12px; border-radius: 12px; font-size: 13px; }
+.lastweek.ok { background: rgba(61,220,151,.14); color: #7BEBB8; } .lastweek.ko { background: rgba(255,90,110,.13); color: #FF9AA6; }
+.hist { display: flex; gap: 8px; margin-top: 10px; overflow-x: auto; }
+.hc { flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 10px; opacity: .95; }
+.hc b { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-size: 14px; }
+.hc.ok b { background: rgba(61,220,151,.22); color: #3DDC97; } .hc.ko b { background: rgba(255,90,110,.2); color: #FF7A8A; } .hc i { font-style: normal; opacity: .65; }
+.goal-ed { display: flex; justify-content: space-between; margin: 12px 0 6px; font-size: 14px; } .goal-ed span { opacity: .8; }
+.nchips { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
+.nchip { padding: 10px 0; border-radius: 12px; border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.05); color: inherit; font-size: 15px; font-weight: 600; }
+.nchip.on { background: linear-gradient(135deg, var(--accent), var(--orange)); color: #fff; border-color: transparent; }
+.btn[disabled] { opacity: .45; pointer-events: none; }
+.polecount { margin: 0 0 12px; padding: 10px 14px; border-radius: 14px; background: rgba(255,122,200,.13); color: #FFA6DA; font-size: 13px; }
+.day.sp.pole::after { content: ""; position: absolute; bottom: 5px; width: 6px; height: 6px; border-radius: 50%; background: #FF7AC8; box-shadow: 0 0 0 1.5px rgba(0,0,0,.35); }
+.legend { float: right; font-size: 11px; text-transform: none; letter-spacing: 0; font-weight: 400; opacity: .8; }
+.legend .lg { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin: 0 3px 0 8px; } .lg.gym { background: var(--accent); } .lg.pole { background: #FF7AC8; }
+
+/* Silhouette muscles */
+svg.body { width: 100%; max-width: 420px; display: block; margin: 4px auto 12px; }
+svg.body .bd * { fill: rgba(255,255,255,.06); stroke: rgba(255,255,255,.10); stroke-width: 1; }
+svg.body .mz * { fill: rgba(255,255,255,.07); stroke: rgba(255,255,255,.18); stroke-width: .8; transition: fill-opacity .3s; }
+svg.body .mz.hot * { fill: inherit; fill-opacity: inherit; stroke: inherit; stroke-opacity: .9; }
+svg.body text { fill: currentColor; opacity: .55; font-size: 11px; }
+.bodyseg { max-width: 220px; margin: 8px auto 0; }

@@ -620,3 +620,74 @@ create table if not exists exercise_muscles (template_id text primary key, muscl
 alter table exercise_muscles enable row level security;
 grant usage on schema public to service_role;
 grant select, insert, update, delete on public.profiles, public.hevy_keys, public.workouts, public.exercise_muscles to service_role;
+
+-- ============ Migration 12 : objectif sport (jours / semaine), pole dance saisie à la main, synchro Hevy quotidienne ============
+-- Un objectif est valable à partir de la semaine où il est enregistré (l'historique des semaines passées reste juste).
+create table if not exists sport_goals (
+  profile_id text not null references profiles(id) on delete cascade,
+  from_week  date not null,
+  gym  int not null default 0 check (gym  between 0 and 7),
+  pole int not null default 0 check (pole between 0 and 7),
+  primary key (profile_id, from_week)
+);
+create table if not exists sport_logs (
+  profile_id text not null references profiles(id) on delete cascade,
+  day  date not null,
+  kind text not null check (kind in ('pole')),
+  primary key (profile_id, day, kind)
+);
+create table if not exists cron_secret (value text primary key);
+alter table sport_goals enable row level security;
+alter table sport_logs enable row level security;
+alter table cron_secret enable row level security;
+insert into cron_secret(value) select gen_random_uuid()::text where not exists (select 1 from cron_secret);
+grant select on public.cron_secret to service_role;
+grant select on public.hevy_keys to service_role;
+
+create or replace function set_sport_goal(p_token uuid, p_gym int, p_pole int) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token); mon date := date_trunc('week', now() at time zone 'Europe/Paris')::date;
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  insert into sport_goals(profile_id, from_week, gym, pole)
+  values (me.id, mon, greatest(0, least(7, coalesce(p_gym, 0))), greatest(0, least(7, coalesce(p_pole, 0))))
+  on conflict (profile_id, from_week) do update set gym = excluded.gym, pole = excluded.pole;
+end $$;
+
+create or replace function set_sport_log(p_token uuid, p_day date, p_kind text, p_on boolean) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  if p_kind <> 'pole' or p_day < current_date - 400 or p_day > current_date + 1 then raise exception 'invalide'; end if;
+  if coalesce(p_on, false) then
+    insert into sport_logs(profile_id, day, kind) values (me.id, p_day, p_kind) on conflict do nothing;
+  else
+    delete from sport_logs where profile_id = me.id and day = p_day and kind = p_kind;
+  end if;
+end $$;
+
+-- Objectifs et jours de pole dance : les siens + ceux de l'autre membre du couple (lecture seule)
+create or replace function get_sport(p_token uuid) returns json
+language plpgsql stable security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  return json_build_object(
+    'goals', coalesce((select json_agg(json_build_object('owner', g.profile_id, 'from', g.from_week, 'gym', g.gym, 'pole', g.pole))
+                       from sport_goals g where g.profile_id = me.id or (_is_pair(me.id) and _is_pair(g.profile_id))), '[]'::json),
+    'logs',  coalesce((select json_agg(json_build_object('owner', l.profile_id, 'day', l.day, 'kind', l.kind))
+                       from sport_logs l where l.day >= current_date - 400 and (l.profile_id = me.id or (_is_pair(me.id) and _is_pair(l.profile_id)))), '[]'::json));
+end $$;
+revoke all on function set_sport_goal(uuid,int,int), set_sport_log(uuid,date,text,boolean), get_sport(uuid) from public;
+grant execute on function set_sport_goal(uuid,int,int), set_sport_log(uuid,date,text,boolean), get_sport(uuid) to anon, authenticated;
+
+create extension if not exists pg_cron;
+create extension if not exists pg_net;
+-- Synchro Hevy automatique : tous les jours à 22 h (heure de Paris). On déclenche à 20 h et 21 h UTC ; la fonction ne fait rien
+-- si l'heure de Paris n'est pas 22 h (gère heure d'été / d'hiver).
+select cron.schedule('hevy-daily', '0 20,21 * * *', $$
+  select net.http_post(url := 'https://smypdolihotxtdlbgqua.supabase.co/functions/v1/hevy-sync',
+    headers := '{"Content-Type":"application/json"}'::jsonb,
+    body := jsonb_build_object('cron', (select value from cron_secret limit 1)));
+$$);

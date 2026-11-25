@@ -106,6 +106,8 @@ const labelOf = (it) => (it.google && it.owner !== me) ? `${prof(it.owner)?.name
 const ui = {
   tab: "cal",
   viewAs: null,
+  goalDraft: null,
+  bodyP: "month",
   selected: toISO(new Date()),
   month: startOfMonth(new Date()),
   period: "day",
@@ -556,22 +558,72 @@ function viewCalendar() {
 
 // Liens Hevy / Strava de chacun (ouverts dans un nouvel onglet)
 const okUrl = (u) => typeof u === "string" && /^https:\/\//.test(u);
-let hevyOn = false, hevyBusy = false;
+let hevyOn = false, hevyBusy = false, hevySyncAt = null;
 const fmtDur = (a, b) => { if (!a || !b) return ""; const m = Math.round((new Date(b) - new Date(a)) / 60000); return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}` : `${m} min`; };
 const fmtVol = (v) => v >= 1000 ? (Math.round(v / 100) / 10).toString().replace(".", ",") + " t" : v + " kg";
 // Appelle la fonction serveur qui copie les séances Hevy de la personne, puis recharge les données
-async function syncHevy(manual) {
+async function syncHevy(manual, full) {
   if (!cloud || hevyBusy) return;
   const last = Number(sessionStorage.getItem("iwi2me-hevy-sync") || 0);
   if (!manual && Date.now() - last < 10 * 60 * 1000) return; // au plus une synchro toutes les 10 min en automatique
   hevyBusy = true; if (manual) { toast("Synchronisation Hevy…"); }
   try {
-    const r = await fetch(`${CFG.url}/functions/v1/hevy-sync`, { method: "POST", headers: { "Content-Type": "application/json", apikey: CFG.key }, body: JSON.stringify({ token, full: !!manual }) });
+    const r = await fetch(`${CFG.url}/functions/v1/hevy-sync`, { method: "POST", headers: { "Content-Type": "application/json", apikey: CFG.key }, body: JSON.stringify({ token, full: !!full }) });
     const d = await r.json();
     if (d.ok) { try { sessionStorage.setItem("iwi2me-hevy-sync", String(Date.now())); } catch (e) {} lastSnap = ""; await pull(); if (manual) toast(`Hevy à jour (${d.count} séance${d.count > 1 ? "s" : ""} lue${d.count > 1 ? "s" : ""})`); }
     else if (manual) toast(d.error || "Synchronisation impossible");
   } catch (e) { if (manual) toast("Synchronisation impossible pour le moment"); }
   hevyBusy = false; if (manual) render();
+}
+
+// ----- Objectif sport : jours de salle (Hevy) et de pole dance (saisis à la main) par semaine -----
+const weekMon = (iso) => toISO(mondayOf(fromISO(iso)));
+const goalFor = (who, mon) => (state.goals || []).filter((g) => g.owner === who && String(g.from).slice(0, 10) <= mon).sort((a, b) => (a.from < b.from ? 1 : -1))[0] || null;
+function weekStats(who, mon) {
+  const end = toISO(addDays(fromISO(mon), 6));
+  const gym = new Set((state.workouts || []).filter((w) => w.owner === who && wIso(w.day) >= mon && wIso(w.day) <= end).map((w) => wIso(w.day))).size;
+  const pole = new Set((state.logs || []).filter((l) => l.owner === who && l.kind === "pole" && String(l.day).slice(0, 10) >= mon && String(l.day).slice(0, 10) <= end).map((l) => String(l.day).slice(0, 10))).size;
+  const g = goalFor(who, mon), has = !!g && g.gym + g.pole > 0;
+  return { gym, pole, g, has, ok: has ? gym >= g.gym && pole >= g.pole : null };
+}
+const hasPole = (who, iso) => (state.logs || []).some((l) => l.owner === who && l.kind === "pole" && String(l.day).slice(0, 10) === iso);
+function goalBar(label, done, goal, color) {
+  const pct = goal ? Math.min(100, Math.round((done / goal) * 100)) : 0, ok = goal && done >= goal;
+  return `<div class="grow"><span>${label}</span><div class="mbar"><i style="width:${pct}%;--c:${ok ? "#3DDC97" : color}"></i></div><em class="${ok ? "ok" : ""}">${done} / ${goal}${ok ? " ✓" : ""}</em></div>`;
+}
+// Carte « objectif de la semaine » : avancement + résultat des semaines passées
+function sportGoalCard(who) {
+  const p = prof(who), col = p?.color || "#A45CFF", own = who === me && !viewing();
+  const mon = weekMon(toISO(new Date())), st = weekStats(who, mon);
+  let body;
+  if (!st.has) body = `<div class="empty">${own ? "Pas encore d'objectif sport." : "Aucun objectif défini."}</div>`;
+  else {
+    const left = 7 - ((new Date().getDay() + 6) % 7) - 1;
+    body = (st.g.gym ? goalBar("🏋️ Salle", st.gym, st.g.gym, col) : "") + (st.g.pole ? goalBar("🩰 Pole dance", st.pole, st.g.pole, col) : "")
+      + `<small class="muted">${st.ok ? "Objectif de la semaine atteint 🎉" : left > 0 ? `Encore ${left} jour${left > 1 ? "s" : ""} pour y arriver` : "Dernier jour de la semaine"}</small>`;
+  }
+  // semaines terminées (les 6 dernières)
+  const hist = [];
+  for (let i = 1; i <= 6; i++) { const m = toISO(addDays(fromISO(mon), -7 * i)), r = weekStats(who, m); if (r.has) hist.push({ m, r }); }
+  const last = hist.find((h) => h.m === toISO(addDays(fromISO(mon), -7)));
+  const lastTxt = last ? `<div class="lastweek ${last.r.ok ? "ok" : "ko"}">Semaine dernière : ${last.r.ok ? "objectif réussi ✓" : "objectif manqué"} <small>(salle ${last.r.gym}/${last.r.g.gym}${last.r.g.pole ? `, pole ${last.r.pole}/${last.r.g.pole}` : ""})</small></div>` : "";
+  const chips = hist.length ? `<div class="hist">${hist.reverse().map((h) => `<span class="hc ${h.r.ok ? "ok" : "ko"}" title="Semaine du ${dm(h.m)} : salle ${h.r.gym}/${h.r.g.gym}${h.r.g.pole ? ", pole " + h.r.pole + "/" + h.r.g.pole : ""}"><b>${h.r.ok ? "✓" : "✗"}</b><i>${dm(h.m)}</i></span>`).join("")}</div>` : "";
+  return `<div class="card goalcard"><h3>🎯 Objectif sport · ${esc(p?.name || "")}</h3>${body}${lastTxt}${chips}
+    ${own ? `<div class="btn-line"><button class="btn small" data-act="goto-goal">${st.has ? "Modifier mon objectif" : "Définir mon objectif"}</button></div>` : ""}</div>`;
+}
+// Éditeur de l'objectif (onglet Tâches) : chiffres « x / 7 jours »
+function sportGoalEditor() {
+  if (!cloud) return "";
+  const who = viewing() ? ui.viewAs : me, mon = weekMon(toISO(new Date())), cur = goalFor(who, mon) || { gym: 0, pole: 0 };
+  if (viewing()) return sportGoalCard(who);
+  const d = ui.goalDraft || { gym: cur.gym, pole: cur.pole };
+  const chips = (k) => Array.from({ length: 8 }, (_, v) => `<button type="button" class="nchip ${d[k] === v ? "on" : ""}" data-act="goal-set" data-k="${k}" data-v="${v}">${v}</button>`).join("");
+  const dirty = ui.goalDraft && (d.gym !== cur.gym || d.pole !== cur.pole);
+  return `<div class="card" id="sport-goal"><h3>🎯 Objectif sport (par semaine)</h3>
+    <p class="muted">Combien de jours par semaine veux-tu faire du sport ? La salle se compte toute seule avec Hevy ; le pole dance, tu le coches dans Sport.</p>
+    <div class="goal-ed"><b>🏋️ Salle</b><span>${d.gym} / 7 jours</span></div><div class="nchips">${chips("gym")}</div>
+    <div class="goal-ed"><b>🩰 Pole dance</b><span>${d.pole} / 7 jours</span></div><div class="nchips">${chips("pole")}</div>
+    <div class="btn-line"><button class="btn small ${dirty ? "primary" : ""}" data-act="goal-save" ${dirty ? "" : "disabled"}>Enregistrer l'objectif</button></div></div>${sportGoalCard(me)}`;
 }
 function sportCard() {
   const pair = state.profiles.filter((p) => isPair(p.id));
@@ -587,7 +639,14 @@ function sportCard() {
     if (okUrl(l.hevy)) btns.push(`<a class="btn small" href="${esc(l.hevy)}" target="_blank" rel="noopener">🏋️ Hevy · ${esc(p.name)}</a>`);
     if (okUrl(l.strava)) btns.push(`<a class="btn small" href="${esc(l.strava)}" target="_blank" rel="noopener">🏃 Strava · ${esc(p.name)}</a>`);
   });
-  return `<div class="card"><h3>Sport</h3>${wHtml}${btns.length ? `<div class="btn-line" style="flex-wrap:wrap;margin-top:8px">${btns.join("")}</div>` : ""}</div>`;
+  const who = viewing() ? ui.viewAs : me, own = who === me && !viewing();
+  const poleBtn = own ? `<button class="btn small ${hasPole(me, ui.selected) ? "primary" : ""}" data-act="pole-toggle" data-day="${ui.selected}">🩰 Pole dance ce jour ${hasPole(me, ui.selected) ? "✓" : "＋"}</button>` : (hasPole(who, ui.selected) ? `<div class="empty">🩰 Pole dance ce jour</div>` : "");
+  const ago = hevySyncAt ? ` · mis à jour ${new Date(hevySyncAt).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : "";
+  const refresh = hevyOn && own ? `<button class="btn small" data-act="hevy-refresh">↻ Actualiser mes séances</button>` : "";
+  return `<div class="card"><h3>Sport</h3>${wHtml}
+    ${(poleBtn || refresh) ? `<div class="btn-line" style="flex-wrap:wrap;margin-top:8px">${poleBtn}${refresh}</div>` : ""}
+    ${refresh && ago ? `<small class="muted">${ago.slice(3)}</small>` : ""}
+    ${btns.length ? `<div class="btn-line" style="flex-wrap:wrap;margin-top:8px">${btns.join("")}</div>` : ""}</div>${cloud && isPair(me) ? sportGoalCard(who) : ""}`;
 }
 
 // ----- Onglet Sport : séances Hevy du mois (par personne) -----
@@ -595,6 +654,42 @@ const MUSCLE_FR = { chest: "Pectoraux", shoulders: "Épaules", biceps: "Biceps",
   quadriceps: "Quadriceps", hamstrings: "Ischio-jambiers", glutes: "Fessiers", calves: "Mollets", abductors: "Abducteurs", adductors: "Adducteurs",
   lats: "Dorsaux", upper_back: "Haut du dos", lower_back: "Lombaires", traps: "Trapèzes", neck: "Nuque", cardio: "Cardio", full_body: "Corps entier", other: "Autre" };
 const wIso = (d) => typeof d === "string" ? d.slice(0, 10) : toISO(d);
+
+// Silhouette humaine (face / dos) : chaque zone est colorée selon le nombre de séries du muscle
+function bodySvg(mus, mmax, color) {
+  const z = (k, shape) => {
+    const n = mus.get(k) || 0, o = n ? (0.28 + 0.72 * n / mmax).toFixed(2) : 0;
+    return `<g class="mz ${n ? "hot" : ""}" style="${n ? `fill:${color};fill-opacity:${o};stroke:${color}` : ""}"><title>${MUSCLE_FR[k] || k}${n ? " : " + n + " séries" : ""}</title>${shape}</g>`;
+  };
+  const E = (cx, cy, rx, ry, rot = 0) => `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}"${rot ? ` transform="rotate(${rot} ${cx} ${cy})"` : ""}/>`;
+  const P = (pts) => `<polygon points="${pts}"/>`;
+  const base = (x) => `<g class="bd"><circle cx="${x}" cy="20" r="13"/><path d="M${x - 26} 52 Q${x} 44 ${x + 26} 52 L${x + 20} 126 L${x - 20} 126Z"/><path d="M${x - 20} 124 L${x - 2} 124 L${x - 4} 214 L${x - 20} 214Z"/><path d="M${x + 20} 124 L${x + 2} 124 L${x + 4} 214 L${x + 20} 214Z"/><path d="M${x - 28} 54 L${x - 42} 58 L${x - 48} 122 L${x - 62} 120 L${x - 58} 60 Q${x - 52} 48 ${x - 34} 48Z"/><path d="M${x + 28} 54 L${x + 42} 58 L${x + 48} 122 L${x + 62} 120 L${x + 58} 60 Q${x + 52} 48 ${x + 34} 48Z"/></g>`;
+  const f = 100, b = 300;
+  const front = base(f) +
+    z("neck", `<rect x="${f - 6}" y="32" width="12" height="9" rx="3"/>`) +
+    z("shoulders", E(f - 28, 52, 11, 9) + E(f + 28, 52, 11, 9)) +
+    z("chest", `<path d="M${f - 24} 58 Q${f - 10} 53 ${f - 1} 59 L${f - 1} 78 Q${f - 14} 82 ${f - 24} 73Z"/><path d="M${f + 24} 58 Q${f + 10} 53 ${f + 1} 59 L${f + 1} 78 Q${f + 14} 82 ${f + 24} 73Z"/>`) +
+    z("abdominals", `<rect x="${f - 12}" y="82" width="24" height="42" rx="8"/>`) +
+    z("biceps", E(f - 38, 74, 7, 15, 6) + E(f + 38, 74, 7, 15, -6)) +
+    z("forearms", E(f - 46, 106, 6, 17, 4) + E(f + 46, 106, 6, 17, -4)) +
+    z("abductors", E(f - 25, 134, 5, 9) + E(f + 25, 134, 5, 9)) +
+    z("quadriceps", E(f - 15, 156, 10, 28) + E(f + 15, 156, 10, 28)) +
+    z("adductors", E(f - 4, 150, 3.5, 20) + E(f + 4, 150, 3.5, 20)) +
+    z("calves", E(f - 12, 196, 7, 17) + E(f + 12, 196, 7, 17));
+  const back = base(b) +
+    z("traps", P(`${b},38 ${b + 24},50 ${b},66 ${b - 24},50`)) +
+    z("shoulders", E(b - 28, 53, 11, 9) + E(b + 28, 53, 11, 9)) +
+    z("upper_back", P(`${b - 20},62 ${b + 20},62 ${b + 15},82 ${b - 15},82`)) +
+    z("lats", P(`${b - 24},66 ${b - 17},84 ${b - 13},108 ${b - 26},94`) + P(`${b + 24},66 ${b + 17},84 ${b + 13},108 ${b + 26},94`)) +
+    z("triceps", E(b - 38, 74, 7, 15, 6) + E(b + 38, 74, 7, 15, -6)) +
+    z("lower_back", `<rect x="${b - 11}" y="96" width="22" height="26" rx="6"/>`) +
+    z("forearms", E(b - 46, 106, 6, 17, 4) + E(b + 46, 106, 6, 17, -4)) +
+    z("abductors", E(b - 26, 134, 4, 8) + E(b + 26, 134, 4, 8)) +
+    z("glutes", E(b - 12, 134, 12, 11) + E(b + 12, 134, 12, 11)) +
+    z("hamstrings", E(b - 15, 160, 10, 24) + E(b + 15, 160, 10, 24)) +
+    z("calves", E(b - 12, 196, 7, 17) + E(b + 12, 196, 7, 17));
+  return `<svg class="body" viewBox="0 0 400 240" role="img" aria-label="Silhouette des muscles sollicités">${front}${back}<text x="${f}" y="234" text-anchor="middle">Face</text><text x="${b}" y="234" text-anchor="middle">Dos</text></svg>`;
+}
 function viewSport() {
   const who = ui.viewAs || me, p = prof(who), m = ui.month, y = m.getFullYear(), mo = m.getMonth();
   const all = (state.workouts || []).filter((w) => w.owner === who);
@@ -610,20 +705,25 @@ function viewSport() {
   for (let d = mondayOf(new Date(y, mo, 1)); d <= new Date(y, mo, dim); d = addDays(d, 7)) wk.set(toISO(d), 0);
   inM.forEach((w) => { const k = toISO(mondayOf(fromISO(wIso(w.day)))); if (wk.has(k)) wk.set(k, wk.get(k) + 1); });
   const wmax = Math.max(1, ...wk.values());
-  // muscles les plus sollicités (nombre de séries par groupe musculaire principal)
+  // muscles les plus sollicités (séries par groupe musculaire), sur la semaine sélectionnée ou le mois affiché
+  const selMon = mondayOf(fromISO(ui.selected)), selSun = addDays(selMon, 6);
+  const inP = ui.bodyP === "week" ? all.filter((w) => { const k = wIso(w.day); return k >= toISO(selMon) && k <= toISO(selSun); }) : inM;
+  const pLabel = ui.bodyP === "week" ? `Semaine du ${dm(toISO(selMon))} au ${dm(toISO(selSun))}` : `${MOIS_LONG[mo]} ${y}`;
   const mus = new Map();
-  inM.forEach((w) => (w.ex || []).forEach((e) => { if (e.m) mus.set(e.m, (mus.get(e.m) || 0) + (e.s || 0)); }));
+  inP.forEach((w) => (w.ex || []).forEach((e) => { if (e.m) mus.set(e.m, (mus.get(e.m) || 0) + (e.s || 0)); }));
   const mlist = [...mus.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8), mmax = Math.max(1, ...mlist.map((x) => x[1]));
-  const noMuscle = inM.length && !mlist.length;
+  const noMuscle = inP.length && !mlist.length;
   // grille du mois
   const first = mondayOf(m); let cells = "";
   for (let i = 0; i < 42; i++) {
     const d = addDays(first, i), iso = toISO(d);
     if (i >= 35 && d.getMonth() !== mo) break;
     const n = days.get(iso) || 0, inMonth = d.getMonth() === mo;
-    cells += `<button class="day sp ${!inMonth ? "out" : ""} ${n ? "went" : ""} ${iso === toISO(today) ? "today" : ""} ${iso === ui.selected ? "sel" : ""}" style="--c:${p?.color || "#A45CFF"}" data-act="pick" data-date="${iso}">${d.getDate()}${n > 1 ? `<span class="cnt">${n}</span>` : ""}</button>`;
+    cells += `<button class="day sp ${!inMonth ? "out" : ""} ${n ? "went" : ""} ${hasPole(who, iso) ? "pole" : ""} ${iso === toISO(today) ? "today" : ""} ${iso === ui.selected ? "sel" : ""}" style="--c:${p?.color || "#A45CFF"}" data-act="pick" data-date="${iso}">${d.getDate()}${n > 1 ? `<span class="cnt">${n}</span>` : ""}</button>`;
   }
   const dayWs = all.filter((w) => wIso(w.day) === ui.selected);
+  const poleN = (state.logs || []).filter((l) => l.owner === who && l.kind === "pole" && String(l.day).slice(0, 7) === y + "-" + pad(mo + 1)).length;
+  const poleOwn = who === me && !viewing() ? `<button class="btn small ${hasPole(me, ui.selected) ? "primary" : ""}" data-act="pole-toggle" data-day="${ui.selected}" style="margin-top:8px">🩰 Pole dance ce jour ${hasPole(me, ui.selected) ? "✓" : "＋"}</button>` : (hasPole(who, ui.selected) ? `<div class="empty">🩰 Pole dance ce jour</div>` : "");
   const noKey = who === me && !hevyOn;
   return `
     <div class="head">
@@ -641,8 +741,10 @@ function viewSport() {
       <div><b>${mins >= 60 ? Math.floor(mins / 60) + " h " + String(mins % 60).padStart(2, "0") : mins + " min"}</b><span>d'effort</span></div>
       <div><b>${vol ? fmtVol(vol) : "–"}</b><span>soulevé</span></div>
     </div>
+    ${poleN ? `<div class="polecount">🩰 Pole dance : <b>${poleN}</b> jour${poleN > 1 ? "s" : ""} ce mois-ci</div>` : ""}
+    ${cloud && isPair(me) ? sportGoalCard(who) : ""}
     <div class="card">
-      <h3>Jours d'entraînement</h3>
+      <h3>Jours d'entraînement <small class="legend"><i class="lg gym"></i>salle <i class="lg pole"></i>pole</small></h3>
       <div class="dow"><span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span></div>
       <div class="grid">${cells}</div>
     </div>
@@ -651,9 +753,12 @@ function viewSport() {
       <div class="wkbars">${[...wk.entries()].map(([k, n]) => `<div class="wk"><div class="wkb"><i style="height:${Math.round((n / wmax) * 100)}%;--c:${p?.color || "#A45CFF"}"></i></div><b>${n}</b><span>${dm(k)}</span></div>`).join("")}</div>
     </div>
     <div class="card">
-      <h3>Muscles les plus sollicités</h3>
+      <h3>Muscles sollicités</h3>
+      <div class="seg two bodyseg"><button class="${ui.bodyP === "week" ? "on" : ""}" data-act="body-p" data-v="week">Semaine</button><button class="${ui.bodyP !== "week" ? "on" : ""}" data-act="body-p" data-v="month">Mois</button></div>
+      <div class="sub" style="text-align:center;margin:6px 0">${pLabel} · ${inP.length} séance${inP.length > 1 ? "s" : ""}</div>
+      ${bodySvg(mus, mmax, p?.color || "#A45CFF")}
       ${mlist.length ? mlist.map(([k, n]) => `<div class="mrow"><span>${MUSCLE_FR[k] || esc(k)}</span><div class="mbar"><i style="width:${Math.round((n / mmax) * 100)}%;--c:${p?.color || "#A45CFF"}"></i></div><em>${n} séries</em></div>`).join("")
-        : `<div class="empty">${noMuscle ? "Les muscles apparaissent après « Actualiser maintenant » dans Réglages › Hevy." : "Pas encore de séance ce mois-ci."}</div>`}
+        : `<div class="empty">${noMuscle ? "Les muscles apparaissent après « Actualiser » (accueil ou Réglages › Hevy)." : ui.bodyP === "week" ? "Pas de séance cette semaine." : "Pas encore de séance ce mois-ci."}</div>`}
     </div>
     <div class="card">
       <h3>${JOURS_LONG[fromISO(ui.selected).getDay()]} ${fromISO(ui.selected).getDate()} ${MOIS_LONG[fromISO(ui.selected).getMonth()]}</h3>
@@ -661,6 +766,7 @@ function viewSport() {
         <div class="row"><div class="bar-owner" style="background:${p?.color || "#888"}"></div>
           <div class="t"><b>🏋️ ${esc(w.title)}</b><small>${[fmtDur(w.start, w.end), w.ex.length + (w.ex.length > 1 ? " exos" : " exo"), w.sets + (w.sets > 1 ? " séries" : " série"), w.vol ? fmtVol(w.vol) : ""].filter(Boolean).join(" · ")}</small>
           <small>${w.ex.map((e) => esc(e.t) + " ×" + e.s).join(" · ")}</small></div></div>`).join("") : `<div class="empty">Pas de séance ce jour-là.</div>`}
+      ${poleOwn}
     </div>`;
 }
 function hevyCard() {
@@ -697,6 +803,7 @@ function viewTasks() {
       </div>
     </div>
     ${profileBar()}${viewBar()}${filterBar()}
+    ${sportGoalEditor()}
     <div class="seg">${Object.keys(labels).map((p) => `<button class="${p === ui.period ? "on" : ""}" data-act="period" data-p="${p}">${labels[p]}</button>`).join("")}</div>
 
     <div class="card overall">
@@ -985,8 +1092,30 @@ document.addEventListener("click", (ev) => {
   if (el.classList.contains("tab")) { ui.tab = el.dataset.tab; render(true); window.scrollTo(0, 0); return; }
 
   const act = el.dataset.act;
-  if (viewing() && ["new-event", "edit-event", "del-event", "new-task", "del-task", "save-prog", "save-event", "save-task", "profile"].includes(act)) { toast("Lecture seule : tu consultes le profil de " + (prof(ui.viewAs)?.name || "l'autre")); return; }
+  if (viewing() && ["new-event", "edit-event", "del-event", "new-task", "del-task", "save-prog", "save-event", "save-task", "profile", "pole-toggle", "goal-set", "goal-save", "hevy-refresh"].includes(act)) { toast("Lecture seule : tu consultes le profil de " + (prof(ui.viewAs)?.name || "l'autre")); return; }
   switch (act) {
+    case "pole-toggle": {
+      const day = el.dataset.day, on = !hasPole(me, day);
+      state.logs = (state.logs || []).filter((l) => !(l.owner === me && l.kind === "pole" && String(l.day).slice(0, 10) === day));
+      if (on) state.logs.push({ owner: me, day, kind: "pole" });
+      render(); lastSnap = "";
+      rpc("set_sport_log", { p_token: token, p_day: day, p_kind: "pole", p_on: on }).then(() => toast(on ? "Pole dance ajouté 🩰" : "Pole dance retiré")).catch(() => { toast("Enregistrement impossible"); pull(); });
+      break;
+    }
+    case "goal-set": {
+      const cur = goalFor(me, weekMon(toISO(new Date()))) || { gym: 0, pole: 0 };
+      ui.goalDraft = ui.goalDraft || { gym: cur.gym, pole: cur.pole };
+      ui.goalDraft[el.dataset.k] = Number(el.dataset.v); render(); break;
+    }
+    case "goal-save": {
+      const d = ui.goalDraft; if (!d) break; const mon = weekMon(toISO(new Date()));
+      state.goals = (state.goals || []).filter((g) => !(g.owner === me && String(g.from).slice(0, 10) === mon)).concat([{ owner: me, from: mon, gym: d.gym, pole: d.pole }]);
+      ui.goalDraft = null; render(); lastSnap = "";
+      rpc("set_sport_goal", { p_token: token, p_gym: d.gym, p_pole: d.pole }).then(() => toast("Objectif enregistré 🎯")).catch(() => { toast("Enregistrement impossible"); pull(); });
+      break;
+    }
+    case "body-p": ui.bodyP = el.dataset.v === "week" ? "week" : "month"; render(); break;
+    case "goto-goal": ui.tab = "tasks"; render(true); setTimeout(() => document.getElementById("sport-goal")?.scrollIntoView({ behavior: "smooth", block: "center" }), 80); break;
     case "view-as": ui.viewAs = el.dataset.id === me ? null : el.dataset.id; render(); break;
     case "pick": ui.selected = el.dataset.date; render(); break;
     case "month": ui.month = new Date(ui.month.getFullYear(), ui.month.getMonth() + Number(el.dataset.dir), 1); render(); break;
@@ -1044,10 +1173,11 @@ document.addEventListener("click", (ev) => {
     case "hevy-save": {
       const k = $("#hvKey").value.trim();
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(k)) { toast("Clé Hevy invalide (elle ressemble à xxxxxxxx-xxxx-…)"); break; }
-      rpc("set_hevy_key", { p_token: token, p_key: k }).then(async () => { hevyOn = true; $("#hvKey").value = ""; render(); await syncHevy(true); }).catch(() => toast("Enregistrement impossible"));
+      rpc("set_hevy_key", { p_token: token, p_key: k }).then(async () => { hevyOn = true; $("#hvKey").value = ""; render(); await syncHevy(true, true); }).catch(() => toast("Enregistrement impossible"));
       break;
     }
-    case "hevy-sync": syncHevy(true); break;
+    case "hevy-sync": syncHevy(true, true); break;
+    case "hevy-refresh": syncHevy(true, false); break;
     case "hevy-remove":
       if (!confirm("Déconnecter Hevy ? Tes séances copiées dans l'appli seront effacées.")) break;
       rpc("set_hevy_key", { p_token: token, p_key: "" }).then(() => { hevyOn = false; state.workouts = (state.workouts || []).filter((w) => w.owner !== me); lastSnap = ""; render(); toast("Hevy déconnecté"); }).catch(() => toast("Action impossible"));
@@ -1249,14 +1379,15 @@ let lastSnap = "";
 async function pull() {
   try {
     const d = await rpc("get_data", { p_token: token });
+    try { d.sport = await rpc("get_sport", { p_token: token }); } catch (e) { d.sport = { goals: state.goals || [], logs: state.logs || [] }; }
     const snap = JSON.stringify(d);
-    me = d.me.id; isAdmin = !!d.me.admin; gShared = !!d.me.gcal_shared; hevyOn = !!d.me.hevy;
+    me = d.me.id; isAdmin = !!d.me.admin; gShared = !!d.me.gcal_shared; hevyOn = !!d.me.hevy; hevySyncAt = d.me.hevy_sync || null;
     const first = !loaded;
     if (snap !== lastSnap) {
       lastSnap = snap;
       const typing = sheet.open || document.activeElement?.matches?.("input, select"); // ne pas casser une saisie en cours
       const loc = new Map(state.tasks.filter((t) => pendingProg.has(t.id)).map((t) => [t.id, t]));
-      state.profiles = d.profiles; state.events = d.events; state.gcalShared = d.gcal || []; state.workouts = d.workouts || [];
+      state.profiles = d.profiles; state.events = d.events; state.gcalShared = d.gcal || []; state.workouts = d.workouts || []; state.goals = d.sport?.goals || []; state.logs = d.sport?.logs || [];
       // un % pas encore sauvegardé garde SA valeur locale (ma part), le reste vient de la base
       state.tasks = d.tasks.map((t) => { const l = loc.get(t.id); return l ? Object.assign({}, t, { [myField(t)]: l[myField(t)] }) : t; });
       fixColors(state.profiles);
@@ -1265,14 +1396,13 @@ async function pull() {
       if (first || !typing) render();
     }
     if (first) maybeImportLocal(d);
-    if (first && hevyOn) syncHevy(false); // met à jour les séances à chaque ouverture
   } catch (e) {
     if (String(e.message).includes("lien invalide")) { // lien révoqué ou invalide
       localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(CACHE_KEY);
       alert("Session expirée : reconnecte-toi avec ton e-mail et ton code."); location.reload(); return;
     }
     if (!loaded) { // hors connexion : dernière version connue
-      try { const d = JSON.parse(localStorage.getItem(CACHE_KEY)); if (d) { me = d.me.id; isAdmin = !!d.me.admin; gShared = !!d.me.gcal_shared; state.gcalShared = d.gcal || []; state.workouts = d.workouts || []; hevyOn = !!d.me.hevy; state.profiles = d.profiles; state.events = d.events; state.tasks = d.tasks; loaded = true; render(); toast("Hors connexion : dernière version affichée"); } } catch (x) {}
+      try { const d = JSON.parse(localStorage.getItem(CACHE_KEY)); if (d) { me = d.me.id; isAdmin = !!d.me.admin; gShared = !!d.me.gcal_shared; state.gcalShared = d.gcal || []; state.workouts = d.workouts || []; state.goals = d.sport?.goals || []; state.logs = d.sport?.logs || []; hevyOn = !!d.me.hevy; state.profiles = d.profiles; state.events = d.events; state.tasks = d.tasks; loaded = true; render(); toast("Hors connexion : dernière version affichée"); } } catch (x) {}
     }
   }
 }

@@ -6,18 +6,9 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Content-Type": "application/json" };
 const J = (o: unknown, s = 200) => new Response(JSON.stringify(o), { status: s, headers: cors });
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
-  try {
-    const { token, full } = await req.json();
-    if (!/^[0-9a-f-]{36}$/i.test(token || "")) return J({ error: "jeton invalide" }, 401);
-    const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    const { data: me, error: e1 } = await db.from("profiles").select("id").eq("token", token).maybeSingle();
-    if (e1) return J({ error: "lecture profil impossible", detail: String(e1.message || e1) }, 500);
-    if (!me) return J({ error: "jeton invalide" }, 401);
-    const { data: k, error: e2 } = await db.from("hevy_keys").select("api_key, synced_at").eq("profile_id", me.id).maybeSingle();
-    if (e2) return J({ error: "lecture cle impossible", detail: String(e2.message || e2) }, 500);
-    if (!k) return J({ error: "aucune cle Hevy" }, 400);
+// Synchronise une personne : renvoie un objet {ok,count,muscles} ou {error,...,status}
+async function syncOne(db: any, profileId: string, k: { api_key: string; synced_at: string | null }, full: boolean) {
+  const me = { id: profileId };
     const H = { "api-key": k.api_key, accept: "application/json" };
 
     // 1) seances : jusqu'a 30 pages de 10 a la 1re synchro (ou sur demande), sinon les 2 pages les plus recentes
@@ -26,8 +17,8 @@ Deno.serve(async (req) => {
     let page = 1, pageCount = 1;
     while (page <= Math.min(pageCount, maxPages)) {
       const r = await fetch("https://api.hevyapp.com/v1/workouts?page=" + page + "&pageSize=10", { headers: H });
-      if (r.status === 401 || r.status === 403) return J({ error: "Cle Hevy refusee (Hevy Pro requis)" }, 400);
-      if (!r.ok) return J({ error: "Hevy indisponible (" + r.status + ")" }, 502);
+      if (r.status === 401 || r.status === 403) return { error: "Cle Hevy refusee (Hevy Pro requis)", status: 400 };
+      if (!r.ok) return { error: "Hevy indisponible (" + r.status + ")", status: 502 };
       const d = await r.json();
       pageCount = d.page_count || 1;
       raw.push(...(d.workouts || []));
@@ -76,10 +67,39 @@ Deno.serve(async (req) => {
     });
     if (rows.length) {
       const { error } = await db.from("workouts").upsert(rows, { onConflict: "id" });
-      if (error) return J({ error: "ecriture impossible", detail: String(error.message || error) }, 500);
+      if (error) return { error: "ecriture impossible", detail: String(error.message || error), status: 500 };
     }
     await db.from("hevy_keys").update({ synced_at: new Date().toISOString() }).eq("profile_id", me.id);
-    return J({ ok: true, count: rows.length, muscles: known.size });
+    return { ok: true, count: rows.length, muscles: known.size };
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
+  try {
+    const { token, full, cron } = await req.json();
+    const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+
+    // Mode planifie (pg_cron, 20 h et 21 h UTC) : n'agit que s'il est 22 h a Paris, pour toutes les cles Hevy
+    if (cron) {
+      const { data: sec } = await db.from("cron_secret").select("value").limit(1).maybeSingle();
+      if (!sec || sec.value !== cron) return J({ error: "refuse" }, 401);
+      const hour = Number(new Intl.DateTimeFormat("en-GB", { hour: "2-digit", hour12: false, timeZone: "Europe/Paris" }).format(new Date()));
+      if (hour !== 22) return J({ ok: true, skipped: "pas 22h a Paris" });
+      const { data: keys } = await db.from("hevy_keys").select("profile_id, api_key, synced_at");
+      const out: unknown[] = [];
+      for (const k of keys || []) out.push(await syncOne(db, k.profile_id, k, false));
+      return J({ ok: true, cron: true, results: out });
+    }
+
+    if (!/^[0-9a-f-]{36}$/i.test(token || "")) return J({ error: "jeton invalide" }, 401);
+    const { data: me, error: e1 } = await db.from("profiles").select("id").eq("token", token).maybeSingle();
+    if (e1) return J({ error: "lecture profil impossible", detail: String(e1.message || e1) }, 500);
+    if (!me) return J({ error: "jeton invalide" }, 401);
+    const { data: k, error: e2 } = await db.from("hevy_keys").select("api_key, synced_at").eq("profile_id", me.id).maybeSingle();
+    if (e2) return J({ error: "lecture cle impossible", detail: String(e2.message || e2) }, 500);
+    if (!k) return J({ error: "aucune cle Hevy" }, 400);
+    const r: any = await syncOne(db, me.id, k, !!full);
+    return J(r, r.status || 200);
   } catch (e) {
     return J({ error: "erreur", detail: String((e as any)?.message || e) }, 500);
   }
