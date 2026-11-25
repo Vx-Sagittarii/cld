@@ -498,3 +498,9 @@ button.chk { cursor: pointer; }
 .chk .cl b { font-size: 15px; }
 .chk .cl small { color: var(--muted); font-size: 12px; line-height: 1.35; }
 .chk .cl a { color: var(--accent); font-weight: 700; text-decoration: none; }
+
+/* Surbrillance autour du personnage affiché : orange pour Nelson, vert pour Sophie */
+.spot.active { box-shadow: 0 0 0 3px var(--ring), 0 0 22px 6px var(--ring); background: radial-gradient(closest-side, transparent 60%, var(--ring-soft)); }
+#spotNelson { --ring: #FF8A3D; --ring-soft: rgba(255,138,61,.18); }
+#spotSophie { --ring: #3DDC97; --ring-soft: rgba(61,220,151,.18); }
+.spot.active .tag { background: var(--ring); color: #1a0d40; }

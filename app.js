@@ -465,7 +465,7 @@ function filterBar() {
   return `<div class="seg two">${f.map(([k, l]) => `<button class="${k === ui.filter ? "on" : ""}" data-act="filter" data-f="${k}">${l}</button>`).join("")}</div>`;
 }
 function renderHero() {
-  document.querySelectorAll(".spot").forEach((s) => s.classList.toggle("active", s.dataset.id === me));
+  document.querySelectorAll(".spot").forEach((s) => s.classList.toggle("active", s.dataset.id === (viewing() ? ui.viewAs : me)));
 }
 
 // ----- Mini-journée : les événements du jour en un coup d'œil -----
@@ -1551,8 +1551,7 @@ function toast(msg) {
 function setMe(id) {
   if (!prof(id)) return;
   if (cloud) { // en ligne, on ne change pas de profil : toucher l'autre personnage = lui ajouter un événement
-    if (id === me) toast(`Calendrier de ${prof(id).name}`);
-    else if (isPair(me) && isPair(id)) openEventSheet(id);
+    if (isPair(me) && isPair(id)) { ui.viewAs = id === me ? null : id; render(); } // toucher l'autre = voir son profil (lecture seule) ; toucher le sien = revenir au sien
     return;
   }
   me = id; ui.filter = "perso";
@@ -1595,7 +1594,7 @@ function importData(file) {
   document.querySelectorAll(".spot").forEach((s) => s.addEventListener("click", () => {
     setMe(s.dataset.id);
     const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (!cloud || s.dataset.id === me) $("#view").scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+    if (!cloud || isPair(me)) $("#view").scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
   }));
   // Fermer l'affiche en grand en la touchant
   $("#photo").addEventListener("click", () => $("#photo").close());
