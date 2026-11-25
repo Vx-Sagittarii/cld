@@ -359,11 +359,12 @@ alter table profiles add column if not exists chg_hash text, add column if not e
 -- Connexion : tout ce qui n'est pas 4 à 12 chiffres est refusé
 create or replace function login(p_email text, p_pin text) returns json
 language plpgsql security definer set search_path = public, extensions as $$
-declare p profiles; em text := lower(trim(coalesce(p_email, ''))); th login_throttle; kk text; nf int;
+declare p profiles; em text := lower(trim(coalesce(p_email, ''))); th login_throttle; kk text; nf int; lim int;
 begin
   if p_pin is null or p_pin !~ '^[0-9]{4,12}$' then p_pin := ''; end if;   -- non numérique : jamais accepté
   select * into p from profiles where lower(email) = em and pin_hash is not null;
   kk := coalesce(p.id, '*nouveau');
+  lim := case when kk in ('*nouveau', 'sophie') then 10 else 5 end;   -- 10 essais pour la 1re connexion / Sophie, 5 sinon
   select * into th from login_throttle where k = kk;
   if th.locked_until is not null and th.locked_until > now() then
     return json_build_object('error', 'Trop de tentatives, réessaie dans 15 minutes.');
@@ -376,7 +377,7 @@ begin
   end if;
   if p.id is null then
     nf := case when th.k is null or (th.locked_until is not null and th.locked_until <= now()) then 1 else th.fails + 1 end;
-    insert into login_throttle(k, fails, locked_until) values (kk, nf, case when nf >= 5 then now() + interval '15 minutes' end)
+    insert into login_throttle(k, fails, locked_until) values (kk, nf, case when nf >= lim then now() + interval '15 minutes' end)
       on conflict (k) do update set fails = excluded.fails, locked_until = excluded.locked_until;
     return json_build_object('error', 'E-mail ou code incorrect.');
   end if;
