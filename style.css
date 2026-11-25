@@ -312,3 +312,5 @@ body.noel { background:
 @media (prefers-reduced-motion: reduce) { #snow, .burst { display: none !important; } }
 
 .sheet-err{background:rgba(226,59,78,.18);border:1px solid #E23B4E;color:#FFD6DA;padding:10px 12px;border-radius:12px;margin:4px 0 10px;font-size:14px}
+
+.span-hint{color:var(--muted);font-size:13px;min-height:18px;margin:-4px 2px 8px}

@@ -152,16 +152,42 @@ function periodLabel(period, d) {
   return String(d.getFullYear());
 }
 
-// Heures d'un événement : "19:30" ou "19:30-21:00" (début-fin), "" = toute la journée
+// Heures d'un événement (texte) : "19:30", "19:30-21:00", avec date de fin facultative ">2026-12-03"
+// (ex. "22:00-02:00>2026-11-27" ; ">2026-12-03" seul = plusieurs jours sans heure). "" = toute la journée.
 function parseTime(t) {
-  const m = /^(\d\d):(\d\d)(?:-(\d\d):(\d\d))?$/.exec(t || "");
-  if (!m) return null;
-  const s = +m[1] * 60 + +m[2];
-  const e = m[3] ? +m[3] * 60 + +m[4] : null;
-  return { s, e: e !== null && e > s ? e : null };
+  const m = /^(?:(\d\d):(\d\d)(?:-(\d\d):(\d\d))?)?(?:>(\d{4}-\d\d-\d\d))?$/.exec(t || "");
+  if (!m || !t) return null;
+  return { s: m[1] !== undefined ? +m[1] * 60 + +m[2] : null, e: m[3] !== undefined ? +m[3] * 60 + +m[4] : null, endDate: m[5] || null };
 }
 const hhmm = (min) => `${pad(Math.floor(min / 60))}:${pad(min % 60)}`;
-const fmtTime = (t) => { const p = parseTime(t); return p ? (p.e ? `${hhmm(p.s)}–${hhmm(p.e)}` : hhmm(p.s)) : ""; };
+const dm = (iso) => { const d = fromISO(iso); return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}`; };
+// Dernier jour d'un événement (= son jour de début s'il tient sur une journée)
+function endDateOf(e) { const p = parseTime(e.time); return p && p.endDate && p.endDate > e.date ? p.endDate : e.date; }
+const onDay = (e, iso) => iso >= e.date && iso <= endDateOf(e);
+// Partie de l'événement qui tombe sur le jour `iso` : {s,e} en minutes, ou null = toute la journée
+function segFor(e, iso) {
+  const p = parseTime(e.time), end = endDateOf(e);
+  if (end === e.date) return p && p.s !== null ? { s: p.s, e: p.e !== null && p.e > p.s ? p.e : null } : null;
+  if (iso === e.date) return p && p.s !== null ? { s: p.s, e: 1440 } : null;
+  if (iso === end) return p && p.e !== null ? { s: 0, e: p.e } : null;
+  return null;
+}
+function fmtWhen(e) {
+  const p = parseTime(e.time), end = endDateOf(e);
+  if (end === e.date) return p && p.s !== null ? (p.e !== null && p.e > p.s ? `${hhmm(p.s)}–${hhmm(p.e)}` : hhmm(p.s)) : "";
+  return `${dm(e.date)}${p && p.s !== null ? " " + hhmm(p.s) : ""} → ${dm(end)}${p && p.e !== null ? " " + hhmm(p.e) : ""}`;
+}
+// Règle des heures : si la fin est avant le début, elle compte pour le lendemain.
+function computeSpan(date, endIn, t1, t2) {
+  if (!t1 && t2) return { err: "Indique aussi l'heure de début (De)." };
+  let endDate = endIn && endIn !== date ? endIn : "";
+  if (endDate && endDate < date) return { err: "La date de fin doit être après la date de début." };
+  if (t1 && t2 && !endDate) {
+    if (t2 === t1) return { err: "Le début et la fin sont identiques." };
+    if (t2 < t1) endDate = toISO(addDays(fromISO(date), 1));
+  }
+  return { endDate };
+}
 
 // ---------------------------------------------------------------
 // 3. OUTILS D'AFFICHAGE
@@ -324,8 +350,8 @@ function renderHero() {
 // ----- Mini-journée : les événements du jour en un coup d'œil -----
 function dayStrip(evs) {
   if (!evs.length) return "";
-  const timed = evs.map((e) => ({ e, p: parseTime(e.time) })).filter((x) => x.p);
-  const allday = evs.filter((e) => !parseTime(e.time));
+  const timed = evs.map((e) => ({ e, p: segFor(e, ui.selected) })).filter((x) => x.p);
+  const allday = evs.filter((e) => !segFor(e, ui.selected));
   let html = allday.map((e) => `<span class="allday" style="--c:${colorOf(e)}">${esc(e.title)}</span>`).join("");
   if (allday.length) html = `<div class="alldays">${html}</div>`;
   if (timed.length) {
@@ -348,7 +374,7 @@ function dayStrip(evs) {
     for (let m = Math.ceil(lo / step) * step; m <= hi; m += step) ticks += `<i style="left:${((m - lo) / span) * 100}%"><b>${Math.floor(m / 60)}h</b></i>`;
     const bars = timed.map((x) => {
       const left = ((x.p.s - lo) / span) * 100, w = Math.max(((end(x) - x.p.s) / span) * 100, 22);
-      return `<div class="bar" style="left:${left}%;width:${Math.min(w, 100 - left)}%;top:${x.lane * 30}px;--c:${colorOf(x.e)}" title="${esc(x.e.title)} ${fmtTime(x.e.time)}"><span>${esc(x.e.title)}</span></div>`;
+      return `<div class="bar" style="left:${left}%;width:${Math.min(w, 100 - left)}%;top:${x.lane * 30}px;--c:${colorOf(x.e)}" title="${esc(x.e.title)} ${fmtWhen(x.e)}"><span>${esc(x.e.title)}</span></div>`;
     }).join("");
     const now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
     const nowLine = ui.selected === toISO(now) && nowMin >= lo && nowMin <= hi ? `<u class="now" style="left:${((nowMin - lo) / span) * 100}%"></u>` : "";
@@ -368,20 +394,20 @@ function viewCalendar() {
     if (i >= 35 && d.getMonth() !== m.getMonth()) break; // pas de 6e ligne inutile
     // Pastilles de couleur : qui a quelque chose ce jour-là ?
     const cols = new Set([
-      ...EV.filter((e) => e.date === iso && passes(e)).map(colorOf),
+      ...EV.filter((e) => onDay(e, iso) && passes(e)).map(colorOf),
       ...state.tasks.filter((t) => t.period === "day" && t.key === iso && passes(t)).map(colorOf)
     ]);
     const dots = [...cols].slice(0, 3).map((c) => `<i class="dot" style="background:${c}"></i>`).join("");
     const inMonth = d.getMonth() === m.getMonth();
     const door = dec && inMonth && d.getDate() <= 25;
-    const has = door && EV.some((e) => e.date === iso && passes(e));
+    const has = door && EV.some((e) => onDay(e, iso) && passes(e));
     const cls = ["day", !inMonth ? "out" : "", iso === today ? "today" : "", iso === ui.selected ? "sel" : "",
       door ? "door" : "", door && d.getDate() % 2 ? "odd" : "", has ? "open" : "", dec && inMonth && d.getDate() === 24 ? "eve" : ""].join(" ");
     cells += `<button class="${cls}" data-act="pick" data-date="${iso}">${d.getDate()}<span class="dots">${dots}</span></button>`;
   }
 
   const sel = fromISO(ui.selected);
-  const evs = EV.filter((e) => e.date === ui.selected && passes(e)).sort((a, b) => (parseTime(a.time)?.s ?? -1) - (parseTime(b.time)?.s ?? -1));
+  const evs = EV.filter((e) => onDay(e, ui.selected) && passes(e)).sort((a, b) => (segFor(a, ui.selected)?.s ?? -1) - (segFor(b, ui.selected)?.s ?? -1));
   const tks = state.tasks.filter((t) => t.period === "day" && t.key === ui.selected && passes(t));
 
   return `
@@ -407,8 +433,8 @@ function viewCalendar() {
       ${evs.length ? evs.map((e) => `
         <div class="row">
           <div class="bar-owner" style="background:${colorOf(e)}"></div>
-          <div class="t"><b>${esc(e.title)}</b><small>${esc(labelOf(e))}</small></div>
-          <div class="time">${fmtTime(e.time) || "Journée"}</div>
+          <div class="t"><b>${esc(e.title)}</b><small>${esc(labelOf(e))}${endDateOf(e) > e.date ? " · " + esc(fmtWhen(e)) : ""}</small></div>
+          <div class="time">${endDateOf(e) > e.date ? `Jour ${Math.round((fromISO(ui.selected) - fromISO(e.date)) / 864e5) + 1}/${Math.round((fromISO(endDateOf(e)) - fromISO(e.date)) / 864e5) + 1}` : fmtWhen(e) || "Journée"}</div>
           ${e.google ? `<span class="gtag" title="Google Agenda">G</span>` : `<button class="del" data-act="del-event" data-id="${e.id}" aria-label="Supprimer">×</button>`}
         </div>`).join("") : `<div class="empty">Rien de prévu ce jour-là.</div>`}
       <button class="add-btn" data-act="new-event">+ Ajouter un événement</button>
@@ -558,15 +584,29 @@ function openEventSheet(forId) {
   sheetForm.innerHTML = `<div class="sheet">
     <h2>Nouvel événement</h2>
     <div class="field"><label>Titre</label><input type="text" id="fTitle" placeholder="Dîner chez les parents" autocomplete="off"></div>
-    <div class="field"><label>Date</label><input type="date" id="fDate" value="${ui.selected}"></div>
+    <div class="two">
+      <div class="field"><label>Date</label><input type="date" id="fDate" value="${ui.selected}"></div>
+      <div class="field"><label>Jusqu'au (facultatif)</label><input type="date" id="fEnd" min="${ui.selected}"></div>
+    </div>
     <div class="two">
       <div class="field"><label>De</label><input type="time" id="fTime"></div>
       <div class="field"><label>À (facultatif)</label><input type="time" id="fTimeEnd"></div>
     </div>
+    <div class="span-hint" id="spanHint"></div>
     ${scopeField(forId)}
     <div class="actions"><button type="button" class="btn" data-act="close">Annuler</button><button type="button" class="btn primary" data-act="save-event">Ajouter</button></div>
   </div>`;
   sheet.showModal();
+  const upd = () => {
+    const date = $("#fDate").value || ui.selected;
+    $("#fEnd").min = date;
+    const r = computeSpan(date, $("#fEnd").value, $("#fTime").value, $("#fTimeEnd").value), h = $("#spanHint");
+    const er = $("#sheetErr"); if (er) er.remove();
+    if (r.err) h.textContent = "";
+    else if (r.endDate) { const n = Math.round((fromISO(r.endDate) - fromISO(date)) / 864e5); h.textContent = n === 1 && !$("#fEnd").value ? `La fin compte pour le lendemain (${dm(r.endDate)}).` : `Sur ${n + 1} jours : du ${dm(date)} au ${dm(r.endDate)}.`; }
+    else h.textContent = "";
+  };
+  ["fDate", "fEnd", "fTime", "fTimeEnd"].forEach((i) => $("#" + i).addEventListener("input", upd));
   setTimeout(() => $("#fTitle").focus(), 50);
 }
 
@@ -608,11 +648,10 @@ document.addEventListener("click", (ev) => {
       if (!title) { $("#fTitle").focus(); return; }
       const date = $("#fDate").value || ui.selected;
       const f = readFor();
-      const t1 = $("#fTime").value; let t2 = $("#fTimeEnd").value;
-      if (t1 && t2 === "00:00") t2 = "23:59"; // minuit = fin de journée
-      if (!t1 && t2) { sheetErr("Indique aussi l'heure de début (De)."); return; }
-      if (t1 && t2 && t2 <= t1) { sheetErr("L'heure de fin doit être après l'heure de début."); return; }
-      const time = t1 ? (t2 ? `${t1}-${t2}` : t1) : "";
+      const t1 = $("#fTime").value, t2 = $("#fTimeEnd").value;
+      const span = computeSpan(date, $("#fEnd").value, t1, t2);
+      if (span.err) { sheetErr(span.err); return; }
+      const time = (t1 ? (t2 ? `${t1}-${t2}` : t1) : "") + (span.endDate ? `>${span.endDate}` : "");
       const ev = { id: uid(), title, date, time, ...f };
       state.events.push(ev); push("upsert_event", evArgs(ev));
       save(); sheet.close(); ui.selected = date; ui.month = startOfMonth(fromISO(date)); render(); notifyFor(f); adventBurst(date); break;
