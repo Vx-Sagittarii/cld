@@ -5,5 +5,5 @@ window.IWI_CONFIG = {
   url: "https://smypdolihotxtdlbgqua.supabase.co",
   key: "sb_publishable_uORtTlCpFovtGUJEGLBPFQ_SkC39NSc",
   // Identifiant client Google (public, comme la clé ci-dessus). Vide = Google Agenda désactivé.
-  googleClientId: ""
+  googleClientId: "797706225875-rvlih77k56kub5ptk2k75tu8qrrk7re6.apps.googleusercontent.com"
 };
