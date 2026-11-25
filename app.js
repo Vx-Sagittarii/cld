@@ -8,14 +8,17 @@
 // 1. DONNÉES
 // ---------------------------------------------------------------
 const KEY = "iwi2me-v2", LEGACY = "iwi2me-v1", SESSION = "iwi2me-session";
-const COMMUN_COLOR = "#E8478C";
-const EXTRA_COLORS = ["#1FB5A8", "#3D8BFF", "#F2B705", "#7BC043", "#C05CF0", "#FF5C5C"];
+const COMMUN_COLOR = "#B46BFF";
+const EXTRA_COLORS = ["#3D8BFF", "#F2B705", "#FF5C8A", "#1FB5E8", "#9AE04A", "#E06BFF"];
+// Couleurs imposées aux deux profils de base (appliquées aussi aux anciennes données et à la base)
+const BASE_COLORS = { nelson: "#FF8A3D", sophie: "#3DDC97" };
+const fixColors = (profiles) => profiles.forEach((p) => { if (BASE_COLORS[p.id]) p.color = BASE_COLORS[p.id]; });
 const PAIR = ["nelson", "sophie"]; // seuls ces deux profils partagent le calendrier commun
 
 const defaultState = {
   profiles: [
-    { id: "nelson", name: "Nelson", admin: true, color: "#8B45D9" },
-    { id: "sophie", name: "Sophie", color: "#FF8A3D" }
+    { id: "nelson", name: "Nelson", admin: true, color: "#FF8A3D" },
+    { id: "sophie", name: "Sophie", color: "#3DDC97" }
   ],
   // owner = id d'un profil ; scope = "perso" (visible par le seul propriétaire) ou "commun" (Nelson + Sophie)
   events: [], // { id, title, date, time, owner, scope }
@@ -77,6 +80,7 @@ function save() {
 }
 
 const state = load();
+fixColors(state.profiles);
 const uid = () => Math.random().toString(36).slice(2, 10);
 
 // Profil actif sur cet appareil (par défaut Nelson, l'admin)
@@ -89,7 +93,7 @@ const isPair = (id) => PAIR.includes(id);
 // Règles de visibilité : le commun n'est vu que par Nelson et Sophie ; le reste que par son propriétaire
 const canSee = (it) => it.scope === "commun" ? isPair(me) : it.owner === me;
 const passes = (it) => canSee(it) && (ui.filter === "all" || (ui.filter === "commun") === (it.scope === "commun"));
-const colorOf = (it) => it.scope === "commun" ? COMMUN_COLOR : (prof(it.owner)?.color || "#8B45D9");
+const colorOf = (it) => it.scope === "commun" ? COMMUN_COLOR : (prof(it.owner)?.color || "#A45CFF");
 const labelOf = (it) => it.scope === "commun" ? "Commun" : (prof(it.owner)?.name || "?");
 
 // État de l'interface (non sauvegardé)
@@ -148,6 +152,17 @@ function periodLabel(period, d) {
   return String(d.getFullYear());
 }
 
+// Heures d'un événement : "19:30" ou "19:30-21:00" (début-fin), "" = toute la journée
+function parseTime(t) {
+  const m = /^(\d\d):(\d\d)(?:-(\d\d):(\d\d))?$/.exec(t || "");
+  if (!m) return null;
+  const s = +m[1] * 60 + +m[2];
+  const e = m[3] ? +m[3] * 60 + +m[4] : null;
+  return { s, e: e !== null && e > s ? e : null };
+}
+const hhmm = (min) => `${pad(Math.floor(min / 60))}:${pad(min % 60)}`;
+const fmtTime = (t) => { const p = parseTime(t); return p ? (p.e ? `${hhmm(p.s)}–${hhmm(p.e)}` : hhmm(p.s)) : ""; };
+
 // ---------------------------------------------------------------
 // 3. OUTILS D'AFFICHAGE
 // ---------------------------------------------------------------
@@ -186,6 +201,42 @@ function renderHero() {
   document.querySelectorAll(".spot").forEach((s) => s.classList.toggle("active", s.dataset.id === me));
 }
 
+// ----- Mini-journée : les événements du jour en un coup d'œil -----
+function dayStrip(evs) {
+  if (!evs.length) return "";
+  const timed = evs.map((e) => ({ e, p: parseTime(e.time) })).filter((x) => x.p);
+  const allday = evs.filter((e) => !parseTime(e.time));
+  let html = allday.map((e) => `<span class="allday" style="--c:${colorOf(e)}">${esc(e.title)}</span>`).join("");
+  if (allday.length) html = `<div class="alldays">${html}</div>`;
+  if (timed.length) {
+    // Plage adaptée : au moins 8 h–20 h, élargie si besoin, arrondie à l'heure
+    const end = (x) => x.p.e ?? Math.min(x.p.s + 60, 1440);
+    const lo = Math.max(0, Math.min(8 * 60, Math.floor(Math.min(...timed.map((x) => x.p.s)) / 60) * 60));
+    const hi = Math.min(1440, Math.max(20 * 60, Math.ceil(Math.max(...timed.map(end)) / 60) * 60));
+    const span = hi - lo;
+    const MINW = 0.22 * span; // largeur visuelle minimale (pour que le titre reste lisible)
+    const vend = (x) => Math.max(end(x), x.p.s + MINW);
+    // Pistes : deux événements qui se chevauchent (visuellement) sont empilés
+    const lanes = [];
+    timed.sort((a, b) => a.p.s - b.p.s).forEach((x) => {
+      let i = lanes.findIndex((l) => l <= x.p.s);
+      if (i < 0) { i = lanes.length; lanes.push(0); }
+      lanes[i] = vend(x); x.lane = i;
+    });
+    const step = span > 12 * 60 ? 180 : 120;
+    let ticks = "";
+    for (let m = Math.ceil(lo / step) * step; m <= hi; m += step) ticks += `<i style="left:${((m - lo) / span) * 100}%"><b>${Math.floor(m / 60)}h</b></i>`;
+    const bars = timed.map((x) => {
+      const left = ((x.p.s - lo) / span) * 100, w = Math.max(((end(x) - x.p.s) / span) * 100, 22);
+      return `<div class="bar" style="left:${left}%;width:${Math.min(w, 100 - left)}%;top:${x.lane * 30}px;--c:${colorOf(x.e)}" title="${esc(x.e.title)} ${fmtTime(x.e.time)}"><span>${esc(x.e.title)}</span></div>`;
+    }).join("");
+    const now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
+    const nowLine = ui.selected === toISO(now) && nowMin >= lo && nowMin <= hi ? `<u class="now" style="left:${((nowMin - lo) / span) * 100}%"></u>` : "";
+    html += `<div class="strip" style="height:${lanes.length * 30 + 20}px"><div class="ticks">${ticks}</div>${bars}${nowLine}</div>`;
+  }
+  return `<div class="card"><h3>La journée en un coup d'œil</h3>${html}</div>`;
+}
+
 // ----- Calendrier -----
 function viewCalendar() {
   const m = ui.month, today = toISO(new Date());
@@ -205,7 +256,7 @@ function viewCalendar() {
   }
 
   const sel = fromISO(ui.selected);
-  const evs = state.events.filter((e) => e.date === ui.selected && passes(e)).sort((a, b) => (a.time || "99").localeCompare(b.time || "99"));
+  const evs = state.events.filter((e) => e.date === ui.selected && passes(e)).sort((a, b) => (parseTime(a.time)?.s ?? -1) - (parseTime(b.time)?.s ?? -1));
   const tks = state.tasks.filter((t) => t.period === "day" && t.key === ui.selected && passes(t));
 
   return `
@@ -223,13 +274,14 @@ function viewCalendar() {
       <div class="grid">${cells}</div>
     </div>
 
+    ${dayStrip(evs)}
     <div class="card">
       <h3>${JOURS_LONG[sel.getDay()]} ${sel.getDate()} ${MOIS_LONG[sel.getMonth()]}</h3>
       ${evs.length ? evs.map((e) => `
         <div class="row">
           <div class="bar-owner" style="background:${colorOf(e)}"></div>
           <div class="t"><b>${esc(e.title)}</b><small>${esc(labelOf(e))}</small></div>
-          <div class="time">${e.time || ""}</div>
+          <div class="time">${fmtTime(e.time) || "Journée"}</div>
           <button class="del" data-act="del-event" data-id="${e.id}" aria-label="Supprimer">×</button>
         </div>`).join("") : `<div class="empty">Rien de prévu ce jour-là.</div>`}
       <button class="add-btn" data-act="new-event">+ Ajouter un événement</button>
@@ -361,9 +413,10 @@ function openEventSheet(forId) {
   sheetForm.innerHTML = `<div class="sheet">
     <h2>Nouvel événement</h2>
     <div class="field"><label>Titre</label><input type="text" id="fTitle" placeholder="Dîner chez les parents" autocomplete="off"></div>
+    <div class="field"><label>Date</label><input type="date" id="fDate" value="${ui.selected}"></div>
     <div class="two">
-      <div class="field"><label>Date</label><input type="date" id="fDate" value="${ui.selected}"></div>
-      <div class="field"><label>Heure</label><input type="time" id="fTime"></div>
+      <div class="field"><label>De</label><input type="time" id="fTime"></div>
+      <div class="field"><label>À (facultatif)</label><input type="time" id="fTimeEnd"></div>
     </div>
     ${scopeField(forId)}
     <div class="actions"><button type="button" class="btn" data-act="close">Annuler</button><button type="button" class="btn primary" data-act="save-event">Ajouter</button></div>
@@ -410,7 +463,10 @@ document.addEventListener("click", (ev) => {
       if (!title) { $("#fTitle").focus(); return; }
       const date = $("#fDate").value || ui.selected;
       const f = readFor();
-      const ev = { id: uid(), title, date, time: $("#fTime").value, ...f };
+      const t1 = $("#fTime").value, t2 = $("#fTimeEnd").value;
+      if (t1 && t2 && t2 <= t1) { toast("L'heure de fin doit être après le début"); return; }
+      const time = t1 ? (t2 ? `${t1}-${t2}` : t1) : "";
+      const ev = { id: uid(), title, date, time, ...f };
       state.events.push(ev); push("upsert_event", evArgs(ev));
       save(); sheet.close(); ui.selected = date; ui.month = startOfMonth(fromISO(date)); render(); notifyFor(f); break;
     }
@@ -588,7 +644,7 @@ async function pull() {
     if (snap !== lastSnap) {
       lastSnap = snap;
       const typing = sheet.open || document.activeElement?.matches?.("input, select"); // ne pas casser une saisie en cours
-      state.profiles = d.profiles; state.events = d.events; state.tasks = d.tasks;
+      state.profiles = d.profiles; state.events = d.events; state.tasks = d.tasks; fixColors(state.profiles);
       try { localStorage.setItem(CACHE_KEY, snap); } catch (e) {}
       loaded = true;
       if (first || !typing) render();
