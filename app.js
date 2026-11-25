@@ -792,11 +792,13 @@ function sportCard(inTab) {
   const myA = (state.acts || []).filter((a) => a.owner === who && lday(a) === day);
   const used = new Set();
   const tg = targetsOf(goalFor(who, weekMon(toISO(new Date())))), hasGoal = Object.values(tg).some((v) => v > 0);
-  const seen = (k) => k === "gym" ? myW.length > 0 : k === "run" ? (myA.some((a) => RUN_RE.test(String(a.kind || "").toLowerCase())) || hasLog(who, day, k)) : hasLog(who, day, k);
+  const seen = (k) => k === "gym" ? (myW.length > 0 || hasLog(who, day, k)) : k === "run" ? (myA.some((a) => RUN_RE.test(String(a.kind || "").toLowerCase())) || hasLog(who, day, k)) : hasLog(who, day, k);
   const rows = kindsOf(who).filter(([k]) => !hasGoal || (tg[k] || 0) > 0 || seen(k)).map(([k, label]) => {
     if (k === "gym") {
       const det = myW.map((w) => { const u = hevyUrl(w.owner); const t = `🏋️ ${esc(w.title)}`; return `${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${t} ↗ Hevy</a>` : t} · ${[fmtDur(w.start, w.end), w.ex.length + (w.ex.length > 1 ? " exos" : " exo"), w.sets + (w.sets > 1 ? " séries" : " série"), w.vol ? fmtVol(w.vol) : ""].filter(Boolean).join(" · ")}`; });
-      return chkRow(label, myW.length > 0, { details: det });
+      if (myW.length) return chkRow(label, true, { details: det });
+      const gOn = hasLog(who, day, "gym"); // pas de séance Hevy ce jour-là : on peut cocher à la main (compte 1 dans l'objectif)
+      return chkRow(label, gOn, own ? { toggle: true, kind: "gym", day, details: gOn ? ["Saisi à la main"] : [] } : {});
     }
     const wa = k === "run" ? myA.filter((a) => RUN_RE.test(String(a.kind || "").toLowerCase())) : [];
     wa.forEach((a) => used.add(a.id));

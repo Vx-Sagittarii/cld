@@ -1519,3 +1519,18 @@ alter table admin_secret enable row level security;
 -- 21. Chatbot (dormant tant que CHAT_ON=false dans app.js et que la fonction n'est pas redéployée) :
 -- tables chat_messages / chat_usage, chat_begin (20 messages/jour/personne, 120/jour au total, alerte admin quand la limite est atteinte),
 -- chat_end, chat_history, chat_purge (cron à 23h59 Paris : chat-purge-a / chat-purge-b). Voir aussi get_admin (alerte "Chatbot : limite…").
+
+-- 22. Musculation (gym) cochable à la main quand aucune séance Hevy n'existe ce jour-là
+create or replace function set_sport_log(p_token uuid, p_day date, p_kind text, p_on boolean) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  if not _perm(me, 'sport') then raise exception 'fonction désactivée'; end if;
+  if p_kind !~ '^(gym|pole|run|c_[a-z0-9]{3,12})$' or p_day < current_date - 400 or p_day > current_date + 1 then raise exception 'invalide'; end if;
+  if coalesce(p_on, false) then
+    insert into sport_logs(profile_id, day, kind) values (me.id, p_day, p_kind) on conflict do nothing;
+  else
+    delete from sport_logs where profile_id = me.id and day = p_day and kind = p_kind;
+  end if;
+end $$;
