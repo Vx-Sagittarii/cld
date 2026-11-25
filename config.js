@@ -3,5 +3,7 @@
 // l'accès aux données se fait uniquement avec le lien secret de chaque profil.
 window.IWI_CONFIG = {
   url: "https://smypdolihotxtdlbgqua.supabase.co",
-  key: "sb_publishable_uORtTlCpFovtGUJEGLBPFQ_SkC39NSc"
+  key: "sb_publishable_uORtTlCpFovtGUJEGLBPFQ_SkC39NSc",
+  // Identifiant client Google (public, comme la clé ci-dessus). Vide = Google Agenda désactivé.
+  googleClientId: ""
 };

@@ -177,14 +177,134 @@ const hero = $("#hero");
 function render(animate = false) {
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("on", t.dataset.tab === ui.tab));
   renderHero();
+  applySeason();
   if (!loaded) { view.innerHTML = `<div class="empty">Chargement…</div>`; return; }
   if (ui.tab === "cal") view.innerHTML = viewCalendar();
   else if (ui.tab === "tasks") view.innerHTML = viewTasks();
   else view.innerHTML = viewSettings();
-  view.classList.toggle("enter", animate);        // cascade d'apparition seulement au changement d'onglet
+  view.classList.toggle("enter", animate);
+  if (gcal.on && gcal.token && ui.tab === "cal") ensureGcal();        // cascade d'apparition seulement au changement d'onglet
   hero.classList.toggle("off", ui.tab !== "cal"); // le bandeau photo n'apparaît que sur le calendrier
 }
 
+
+// ---------------------------------------------------------------
+// GOOGLE AGENDA (lecture seule, propre à chaque téléphone / profil)
+// ---------------------------------------------------------------
+const GKEY = "iwi2me-gcal";
+const gcal = { on: false, token: null, loading: false, cache: {}, events: [], gisReady: null };
+try { gcal.on = localStorage.getItem(GKEY) === "1"; } catch (e) {}
+const gReady = () => !!CFG.googleClientId;
+const allEvents = () => gcal.on ? state.events.concat(gcal.events) : state.events;
+
+function loadGIS() {
+  if (gcal.gisReady) return gcal.gisReady;
+  gcal.gisReady = new Promise((ok, ko) => {
+    const el = document.createElement("script");
+    el.src = "https://accounts.google.com/gsi/client"; el.async = true;
+    el.onload = ok; el.onerror = () => { gcal.gisReady = null; ko(new Error("gis")); };
+    document.head.appendChild(el);
+  });
+  return gcal.gisReady;
+}
+// Demande (ou renouvelle) l'accès. Doit être déclenchée par un toucher de l'utilisateur.
+async function connectGoogle(silent) {
+  if (!gReady()) { toast("Google Agenda n'est pas encore configuré"); return; }
+  try { await loadGIS(); } catch (e) { toast("Impossible de joindre Google"); return; }
+  const client = google.accounts.oauth2.initTokenClient({
+    client_id: CFG.googleClientId,
+    scope: "https://www.googleapis.com/auth/calendar.readonly",
+    callback: (r) => {
+      if (r.error || !r.access_token) { toast("Connexion Google annulée"); return; }
+      gcal.token = r.access_token; gcal.on = true; gcal.cache = {}; gcal.events = [];
+      try { localStorage.setItem(GKEY, "1"); } catch (e) {}
+      toast("Google Agenda connecté"); render(); ensureGcal();
+    }
+  });
+  client.requestAccessToken({ prompt: silent ? "" : "consent" });
+}
+function disconnectGoogle() {
+  try { if (gcal.token && window.google) google.accounts.oauth2.revoke(gcal.token); } catch (e) {}
+  gcal.on = false; gcal.token = null; gcal.cache = {}; gcal.events = [];
+  try { localStorage.removeItem(GKEY); } catch (e) {}
+  render(); toast("Google Agenda déconnecté");
+}
+// Charge les événements Google de la grille affichée (42 jours), une fois par mois
+async function ensureGcal() {
+  if (!gcal.on || !gcal.token || gcal.loading) return;
+  const first = mondayOf(ui.month), key = toISO(first);
+  if (gcal.cache[key]) return;
+  gcal.loading = true;
+  try {
+    const url = "https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&maxResults=250"
+      + "&timeMin=" + encodeURIComponent(first.toISOString()) + "&timeMax=" + encodeURIComponent(addDays(first, 42).toISOString());
+    const r = await fetch(url, { headers: { Authorization: "Bearer " + gcal.token } });
+    if (r.status === 401) { gcal.token = null; render(); return; } // jeton expiré : bouton « Reconnecter »
+    if (!r.ok) throw new Error(r.status);
+    const data = await r.json(), list = [];
+    (data.items || []).forEach((g) => {
+      if (g.status === "cancelled") return;
+      const title = g.summary || "(sans titre)";
+      if (g.start?.dateTime) { // événement horaire
+        const a = new Date(g.start.dateTime), b = g.end?.dateTime ? new Date(g.end.dateTime) : null;
+        const same = b && toISO(a) === toISO(b);
+        list.push({ id: "g_" + g.id, title, date: toISO(a), time: `${pad(a.getHours())}:${pad(a.getMinutes())}` + (same ? `-${pad(b.getHours())}:${pad(b.getMinutes())}` : ""), owner: me, scope: "perso", google: true });
+      } else if (g.start?.date) { // journée entière (éventuellement plusieurs jours)
+        let d = fromISO(g.start.date); const end = fromISO(g.end?.date || g.start.date);
+        for (let i = 0; i < 31 && d < end; i++, d = addDays(d, 1)) list.push({ id: "g_" + g.id + "_" + i, title, date: toISO(d), time: "", owner: me, scope: "perso", google: true });
+      }
+    });
+    gcal.cache[key] = true;
+    gcal.events = gcal.events.filter((e) => !list.some((x) => x.id === e.id)).concat(list);
+    render();
+  } catch (e) { toast("Google Agenda : chargement impossible"); }
+  finally { gcal.loading = false; }
+}
+
+// ---------------------------------------------------------------
+// MODE NOËL : calendrier de l'avent pour décembre
+// ---------------------------------------------------------------
+const isDec = () => ui.month.getMonth() === 11;
+const NOEL_IMG = "img/scene-noel.svg", BASE_IMG = "img/scene.svg";
+function applySeason() {
+  const dec = isDec();
+  document.body.classList.toggle("noel", dec);
+  document.querySelectorAll("#heroMedia img, #photo img").forEach((i) => {
+    const want = dec ? NOEL_IMG : BASE_IMG;
+    if (i.getAttribute("src") !== want) i.setAttribute("src", want);
+  });
+  let snow = document.getElementById("snow");
+  if (dec && !snow) {
+    snow = document.createElement("div"); snow.id = "snow"; snow.setAttribute("aria-hidden", "true");
+    snow.innerHTML = Array.from({ length: 26 }, (_, i) => `<i style="left:${(i * 37) % 100}%;--s:${(3 + (i % 5) * 1.6).toFixed(1)}px;--t:${(9 + (i * 7) % 9)}s;--d:-${(i * 1.3).toFixed(1)}s;--x:${(i % 2 ? 1 : -1) * (14 + (i % 4) * 8)}px"></i>`).join("");
+    document.body.appendChild(snow);
+  } else if (!dec && snow) snow.remove();
+}
+function adventCountdown() {
+  const y = ui.month.getFullYear(), today = new Date(), noel = new Date(y, 11, 25);
+  const t0 = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  if (t0.getFullYear() !== y) return `<div class="card advent"><h3>Calendrier de l'avent</h3><div class="count">🎄 <b>Décembre ${y}</b></div></div>`;
+  const n = Math.round((noel - t0) / 86400000);
+  const txt = n > 1 ? `Plus que <b>${n}</b> jours avant Noël` : n === 1 ? `Noël, c'est <b>demain</b> !` : n === 0 ? `<b>Joyeux Noël !</b> 🎁` : `Joyeuses fêtes ! ✨`;
+  return `<div class="card advent"><h3>Calendrier de l'avent</h3><div class="count">🎄 ${txt}</div></div>`;
+}
+// Animation : la case du jour s'ouvre quand on ajoute un événement en décembre
+function adventBurst(iso) {
+  const d = fromISO(iso); if (d.getMonth() !== 11) return;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) { toast(`Case du ${d.getDate()} décembre ouverte 🎁`); return; }
+  const colors = ["#FFE08A", "#FF4D5E", "#3DDC97", "#FFFFFF"];
+  const sparks = Array.from({ length: 24 }, (_, i) => {
+    const a = (i / 24) * Math.PI * 2, r = 100 + Math.random() * 90;
+    return `<i style="--x:${(Math.cos(a) * r).toFixed(0)}px;--y:${(Math.sin(a) * r).toFixed(0)}px;--d:${(Math.random() * .35).toFixed(2)}s;--c:${colors[i % 4]}"></i>`;
+  }).join("");
+  const el = document.createElement("div");
+  el.className = "burst";
+  el.innerHTML = `<div class="bdoor"><div class="inside"><span>🎁</span></div><div class="panel"><b>${d.getDate()}</b></div>${sparks}</div><p>Case du ${d.getDate()} décembre ouverte !</p>`;
+  document.body.appendChild(el);
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add("go")));
+  const kill = () => el.remove();
+  el.addEventListener("click", kill); setTimeout(kill, 3000);
+}
 
 // ----- Barre profils + filtre perso/commun -----
 function profileBar() {
@@ -240,6 +360,7 @@ function dayStrip(evs) {
 // ----- Calendrier -----
 function viewCalendar() {
   const m = ui.month, today = toISO(new Date());
+  const EV = allEvents(), dec = isDec();
   const first = mondayOf(m); // on commence à la semaine qui contient le 1er du mois
   let cells = "";
   for (let i = 0; i < 42; i++) {
@@ -247,16 +368,20 @@ function viewCalendar() {
     if (i >= 35 && d.getMonth() !== m.getMonth()) break; // pas de 6e ligne inutile
     // Pastilles de couleur : qui a quelque chose ce jour-là ?
     const cols = new Set([
-      ...state.events.filter((e) => e.date === iso && passes(e)).map(colorOf),
+      ...EV.filter((e) => e.date === iso && passes(e)).map(colorOf),
       ...state.tasks.filter((t) => t.period === "day" && t.key === iso && passes(t)).map(colorOf)
     ]);
     const dots = [...cols].slice(0, 3).map((c) => `<i class="dot" style="background:${c}"></i>`).join("");
-    const cls = ["day", d.getMonth() !== m.getMonth() ? "out" : "", iso === today ? "today" : "", iso === ui.selected ? "sel" : ""].join(" ");
+    const inMonth = d.getMonth() === m.getMonth();
+    const door = dec && inMonth && d.getDate() <= 25;
+    const has = door && EV.some((e) => e.date === iso && passes(e));
+    const cls = ["day", !inMonth ? "out" : "", iso === today ? "today" : "", iso === ui.selected ? "sel" : "",
+      door ? "door" : "", door && d.getDate() % 2 ? "odd" : "", has ? "open" : "", dec && inMonth && d.getDate() === 24 ? "eve" : ""].join(" ");
     cells += `<button class="${cls}" data-act="pick" data-date="${iso}">${d.getDate()}<span class="dots">${dots}</span></button>`;
   }
 
   const sel = fromISO(ui.selected);
-  const evs = state.events.filter((e) => e.date === ui.selected && passes(e)).sort((a, b) => (parseTime(a.time)?.s ?? -1) - (parseTime(b.time)?.s ?? -1));
+  const evs = EV.filter((e) => e.date === ui.selected && passes(e)).sort((a, b) => (parseTime(a.time)?.s ?? -1) - (parseTime(b.time)?.s ?? -1));
   const tks = state.tasks.filter((t) => t.period === "day" && t.key === ui.selected && passes(t));
 
   return `
@@ -269,7 +394,9 @@ function viewCalendar() {
       </div>
     </div>
     ${profileBar()}${filterBar()}
-    <div class="card">
+    ${dec ? adventCountdown() : ""}
+    ${gcal.on && !gcal.token ? `<button class="add-btn gre" data-act="gcal-connect-silent">Reconnecter Google Agenda</button>` : ""}
+    <div class="card ${dec ? "advent-grid" : ""}">
       <div class="dow"><span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span></div>
       <div class="grid">${cells}</div>
     </div>
@@ -282,7 +409,7 @@ function viewCalendar() {
           <div class="bar-owner" style="background:${colorOf(e)}"></div>
           <div class="t"><b>${esc(e.title)}</b><small>${esc(labelOf(e))}</small></div>
           <div class="time">${fmtTime(e.time) || "Journée"}</div>
-          <button class="del" data-act="del-event" data-id="${e.id}" aria-label="Supprimer">×</button>
+          ${e.google ? `<span class="gtag" title="Google Agenda">G</span>` : `<button class="del" data-act="del-event" data-id="${e.id}" aria-label="Supprimer">×</button>`}
         </div>`).join("") : `<div class="empty">Rien de prévu ce jour-là.</div>`}
       <button class="add-btn" data-act="new-event">+ Ajouter un événement</button>
     </div>
@@ -371,6 +498,17 @@ function viewSettings() {
       <p class="muted">Nelson et Sophie ont chacun leur calendrier et partagent le calendrier « Commun ». Les autres profils sont de simples noms avec leur propre calendrier privé.</p>
     </div>
     ${linkCard}
+    <div class="card">
+      <h3>Google Agenda</h3>
+      <p class="muted">${!gReady()
+        ? "Affiche ton Google Agenda dans ton calendrier iwi2me (lecture seule). Cette fonction sera activée dès que la connexion Google aura été configurée."
+        : gcal.on
+          ? "Connecté. Tes événements Google s'affichent dans ton calendrier perso, en lecture seule. Ils ne sont visibles que par toi, sur ce téléphone."
+          : "Affiche ton Google Agenda dans ton calendrier perso (lecture seule). Chacun connecte le sien ; rien n'est partagé avec l'autre."}</p>
+      ${gReady() ? `<div class="btn-line">${gcal.on
+        ? `<button class="btn small danger" data-act="gcal-disconnect">Déconnecter Google Agenda</button>`
+        : `<button class="btn small" data-act="gcal-connect">Connecter mon Google Agenda</button>`}</div>` : ""}
+    </div>
     <div class="card">
       <h3>Sauvegarde</h3>
       <p class="muted">${cloud ? "Tes données sont enregistrées en ligne. Tu peux aussi en garder une copie." : "Les données restent sur ce téléphone. Exporte-les pour les garder en sécurité ou les transférer."}</p>
@@ -468,7 +606,7 @@ document.addEventListener("click", (ev) => {
       const time = t1 ? (t2 ? `${t1}-${t2}` : t1) : "";
       const ev = { id: uid(), title, date, time, ...f };
       state.events.push(ev); push("upsert_event", evArgs(ev));
-      save(); sheet.close(); ui.selected = date; ui.month = startOfMonth(fromISO(date)); render(); notifyFor(f); break;
+      save(); sheet.close(); ui.selected = date; ui.month = startOfMonth(fromISO(date)); render(); notifyFor(f); adventBurst(date); break;
     }
     case "save-task": {
       const title = $("#fTitle").value.trim();
@@ -481,6 +619,9 @@ document.addEventListener("click", (ev) => {
     }
     case "del-event": state.events = state.events.filter((e) => e.id !== el.dataset.id); push("delete_event", { p_id: el.dataset.id }); save(); render(); break;
     case "del-task": state.tasks = state.tasks.filter((t) => t.id !== el.dataset.id); push("delete_task", { p_id: el.dataset.id }); save(); render(); break;
+    case "gcal-connect": connectGoogle(false); break;
+    case "gcal-connect-silent": connectGoogle(true); break;
+    case "gcal-disconnect": disconnectGoogle(); break;
     case "profile": setMe(el.dataset.id); break;
     case "filter": ui.filter = el.dataset.f; render(); break;
     case "new-profile": {
