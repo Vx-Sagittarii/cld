@@ -20,7 +20,10 @@
     <!-- Bandeau photo animé (hors de #view pour que l'animation ne redémarre pas à chaque clic) -->
     <section class="hero" id="hero" aria-label="Illustration iwi2me, painting session">
       <div class="hero-media" id="heroMedia"><img src="img/scene.svg" alt="Illustration anime : pique-nique de nuit au bord de l'eau, iwi2me painting session" decoding="async"></div>
-      <div class="chip-glass zoom">⤢</div>
+      <!-- Zones cliquables posées sur Nelson (milieu, au fond) et Sophie (à droite) -->
+      <button class="spot" id="spotNelson" data-id="nelson" aria-label="Ouvrir le calendrier de Nelson"><span class="tag">Nelson</span></button>
+      <button class="spot" id="spotSophie" data-id="sophie" aria-label="Ouvrir le calendrier de Sophie"><span class="tag">Sophie</span></button>
+      <button class="chip-glass zoom" data-act="zoom" aria-label="Voir l'illustration en grand">⤢</button>
     </section>
     <div id="view"></div>
   </main>
