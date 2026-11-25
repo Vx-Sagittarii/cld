@@ -1492,7 +1492,7 @@ document.addEventListener("click", (ev) => {
     case "edit-event": { const o = state.events.find((x) => x.id === el.dataset.id); if (o) openEventSheet(null, o); break; }
     case "save-event": {
       const title = $("#fTitle").value.trim();
-      if (!title) { $("#fTitle").focus(); return; }
+      if (!title) { sheetErr("Donne un titre avant d'enregistrer."); $("#fTitle").focus(); return; }
       const date = $("#fDate").value || ui.selected;
       const t1 = $("#fTime").value, t2 = $("#fTimeEnd").value;
       const span = computeSpan(date, $("#fEnd").value, t1, t2);
@@ -1517,7 +1517,7 @@ document.addEventListener("click", (ev) => {
     }
     case "save-task": {
       const title = $("#fTitle").value.trim();
-      if (!title) { $("#fTitle").focus(); return; }
+      if (!title) { sheetErr("Donne un titre avant d'enregistrer."); $("#fTitle").focus(); return; }
       const period = $("#fPeriod").value;
       const f = $("#fVis") && $("#fVis").value === "commun" ? { owner: me, scope: "commun" } : { owner: me, scope: "perso" };
       const tk = { id: uid(), title, period, key: periodKey(period, fromISO(ui.selected)), ...f, progress: 0, progress_b: 0 };
