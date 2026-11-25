@@ -113,8 +113,11 @@ const shown = (t) => persoView() ? mine(t) : tp(t); // volet Perso : seulement m
 const labelOf = (it) => (it.google && it.owner !== me) ? `${prof(it.owner)?.name || "L'autre"} · Google` : persoView() ? (it.scope === "commun" ? "👥 Public" : "🔒 Privé") : (it.scope === "commun" ? "Commun" : (prof(it.owner)?.name || "?"));
 
 // État de l'interface (non sauvegardé)
+const TABS_OK = ["cal", "tasks", "sport", "astro", "settings"];
+const savedNav = (() => { try { return JSON.parse(sessionStorage.getItem("iwi-nav") || "{}"); } catch (e) { return {}; } })(); // survit à l'actualisation, pas à la fermeture
 const ui = {
-  tab: "cal",
+  tab: TABS_OK.includes(savedNav.tab) ? savedNav.tab : "cal",
+  admin: savedNav.admin === true,
   viewAs: null,
   goalDraft: null,
   bodyP: "month",
@@ -260,6 +263,8 @@ function pinKey(k) {
   else if (/^\d$/.test(k) && pinCode.length < 12) pinCode += k;
   const d = document.querySelector("#lgDots"); if (d) d.innerHTML = pinDots();
 }
+let needPseudo = false;
+const REQ = (() => { try { return new URLSearchParams(location.search).has("demande"); } catch (e) { return false; } })();
 const INVITE = (() => { try { const c = new URLSearchParams(location.search).get("invite"); return /^[0-9a-f-]{36}$/i.test(c || "") ? c : null; } catch (e) { return null; } })();
 // Bandeaux de l'accueil : alertes (admin seulement) et rappel d'objectif sport (fin de semaine)
 function banners() {
@@ -272,25 +277,38 @@ function banners() {
   }
   return out.join("");
 }
+const PSEUDO_RE = /^[\p{L}0-9._-]{3,20}$/u;
+const pseudoErr = (p) => !p ? "Choisis un pseudo." : p.length < 3 ? "Pseudo trop court (3 caractères minimum)." : p.length > 20 ? "Pseudo trop long (20 caractères maximum)." : /\s/.test(p) ? "Pas d'espace dans le pseudo." : !PSEUDO_RE.test(p) ? "Pseudo : lettres (accents possibles), chiffres, point, tiret et underscore seulement." : "";
+const PSEUDO_HINT = "3 à 20 caractères : lettres (accents possibles), chiffres, point, tiret. Pas d'espace.";
 function viewSignup() {
   return `<div class="login-box">
     <h1>iwi2me</h1>
-    <p class="muted">Tu es invité(e) : crée ton compte en 20 secondes.</p>
-    <div class="field"><label>Prénom</label><input id="suName" maxlength="24" autocomplete="given-name"></div>
+    <p class="muted">${INVITE ? "Tu es invité(e) : crée ton compte en 20 secondes." : "Demande d'accès : Nelson doit la valider avant que tu puisses entrer."}</p>
+    <div class="field"><label>Pseudo</label><input id="suName" maxlength="20" autocomplete="nickname" autocapitalize="off" spellcheck="false"><small class="muted">${PSEUDO_HINT}</small></div>
     <div class="field"><label>E-mail</label><input id="suMail" type="email" autocomplete="email" inputmode="email" autocapitalize="off"></div>
-    <div class="field"><label>Code secret (6 à 12 chiffres)</label><input class="numonly" id="suPin" type="password" inputmode="numeric" maxlength="12" autocomplete="new-password"></div>
-    <div class="field"><label>Confirme ton code</label><input class="numonly" id="suPin2" type="password" inputmode="numeric" maxlength="12" autocomplete="new-password"></div>
+    <div class="field"><label>Mot de passe (6 à 12 chiffres)</label><input class="numonly" id="suPin" type="password" inputmode="numeric" maxlength="12" autocomplete="new-password"></div>
+    <div class="field"><label>Confirme ton mot de passe</label><input class="numonly" id="suPin2" type="password" inputmode="numeric" maxlength="12" autocomplete="new-password"></div>
     <p class="lg-err" id="lgErr"></p>
-    <button class="btn" data-act="signup">Créer mon compte</button>
+    <button class="btn" data-act="signup">${INVITE ? "Créer mon compte" : "Envoyer ma demande"}</button>
     <p class="muted" style="margin-top:14px">Déjà un compte ? <a href="${location.pathname}">Se connecter</a></p>
   </div>`;
 }
+function viewPseudo() {
+  return `<div class="login-box">
+    <h1>Bienvenue 👋</h1>
+    <p class="muted">Dernière étape : choisis ton pseudo. C'est le nom que verra l'administrateur. Tu ne pourras pas le changer ensuite.</p>
+    <div class="field"><label>Pseudo</label><input id="psName" maxlength="20" autocomplete="nickname" autocapitalize="off" spellcheck="false"><small class="muted">${PSEUDO_HINT}</small></div>
+    <p class="lg-err" id="lgErr"></p>
+    <button class="btn" data-act="pseudo-save">Valider mon pseudo</button>
+    <p class="muted" style="margin-top:14px">Tu pourras changer ton mot de passe dans Réglages.</p>
+  </div>`;
+}
 function viewLogin() {
-  if (INVITE) return viewSignup();
+  if (INVITE || REQ) return viewSignup();
   return `<div class="login-box">
     <h1>iwi2me</h1>
     <p class="muted">Connecte-toi pour retrouver ton espace.</p>
-    <div class="field"><label>E-mail ou identifiant</label><input id="lgMail" type="text" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
+    <div class="field"><label>Nom de compte ou e-mail</label><input id="lgMail" type="text" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
     <div class="field"><label>Code</label>
       <div class="pin-dots" id="lgDots" aria-live="polite">${pinDots()}</div>
       <div class="keypad">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `<button type="button" data-act="pin-key" data-k="${n}">${n}</button>`).join("")}
@@ -300,12 +318,14 @@ function viewLogin() {
     <p class="muted">Indice : devine</p>
     <p class="lg-err" id="lgErr"></p>
     <button class="btn" data-act="login">Se connecter</button>
+    <p class="muted" style="margin-top:14px">Pas de compte ? <a href="${location.pathname}?demande=1">Demander un accès</a></p>
   </div>`;
 }
 
 function render(animate = false) {
-  document.body.classList.toggle("login", needLogin);
+  document.body.classList.toggle("login", needLogin || (loaded && needPseudo));
   if (needLogin) { view.innerHTML = viewLogin(); hero.classList.add("off"); return; }
+  if (loaded && needPseudo) { if (!$("#psName")) view.innerHTML = viewPseudo(); hero.classList.add("off"); return; } // pseudo obligatoire avant tout le reste
   if (permOff(ui.tab)) { ui.tab = "cal"; toast("Cette fonction est désactivée pour ton profil. Demande à Nelson pour l'activer."); }
   document.querySelectorAll(".tab").forEach((t) => { t.classList.toggle("on", t.dataset.tab === ui.tab); t.hidden = permOff(t.dataset.tab); });
   document.body.classList.toggle("solo", cloud && !isNS(me));
@@ -321,6 +341,7 @@ function render(animate = false) {
   view.classList.toggle("enter", animate);
   if (gcal.on && gcal.token && ui.tab === "cal") ensureGcal();        // cascade d'apparition seulement au changement d'onglet
   hero.classList.toggle("off", ui.tab !== "cal" || (cloud && !isNS(me))); // le bandeau photo n'apparaît que sur le calendrier
+  try { sessionStorage.setItem("iwi-nav", JSON.stringify({ tab: ui.tab, admin: !!ui.admin })); } catch (e) {}
 }
 
 
@@ -1074,28 +1095,27 @@ function viewAdmin() {
   const ago = (x) => { if (!x) return "jamais"; const m = Math.round((Date.now() - new Date(x)) / 60000); return m < 2 ? "à l'instant" : m < 60 ? `il y a ${m} min` : m < 2880 ? `il y a ${Math.round(m / 60)} h` : `il y a ${Math.round(m / 1440)} j`; };
   const pend = ad.users.filter((u) => u.status === "pending");
   const pendHtml = pend.map((u) => `<div class="usr"><div class="usr-h"><i class="dot-lg" style="background:${u.color}"></i><b>${esc(u.name)}</b></div>
-      <small class="muted">${esc(u.email || "")} · demandé ${ago(u.requested)} · ${PERM_DEFS.filter(([k]) => (u.perms || {})[k] === false).map(([, l]) => "sans " + l.replace(/^\S+\s/, "")).join(", ") || "tous les droits"}</small>
+      <small class="muted">demandé ${ago(u.requested)} · ${PERM_DEFS.filter(([k]) => (u.perms || {})[k] === false).map(([, l]) => "sans " + l.replace(/^\S+\s/, "")).join(", ") || "tous les droits"}</small>
       <div class="btn-line"><button class="btn small primary" data-act="acc-ok" data-id="${u.id}">Accepter</button><button class="btn small danger" data-act="acc-no" data-id="${u.id}">Refuser</button></div></div>`).join("");
-  const users = ad.users.filter((u) => u.status !== "pending").map((u) => `<div class="usr ${u.status === "blocked" ? "blocked" : ""}"><div class="usr-h"><i class="dot-lg" style="background:${u.color}"></i><b>${esc(u.name)}</b>${u.status === "blocked" ? ` <span class="tag-admin">suspendu</span>` : ""}<button class="del" data-act="del-profile" data-id="${u.id}" aria-label="Supprimer">×</button></div>
-      <small class="muted">${esc(u.email || "")}${u.partner ? ` · 👥 lié(e) à ${esc(u.partner)}` : ""} · vu ${ago(u.last_seen)} · ${u.n_events} événement${u.n_events > 1 ? "s" : ""}, ${u.n_tasks} tâche${u.n_tasks > 1 ? "s" : ""}, ${u.n_acts} séance${u.n_acts > 1 ? "s" : ""}</small>
+  const users = ad.users.filter((u) => u.status !== "pending").map((u) => `<div class="usr ${u.status === "blocked" ? "blocked" : ""}"><div class="usr-h"><i class="dot-lg" style="background:${u.color}"></i><b>${u.need_pseudo ? "<i>pseudo pas encore choisi</i>" : esc(u.name)}</b>${u.status === "blocked" ? ` <span class="tag-admin">suspendu</span>` : ""}<button class="del" data-act="del-profile" data-id="${u.id}" aria-label="Supprimer">×</button></div>
+      <small class="muted">${u.partner ? `👥 lié(e) à ${esc(u.partner)} · ` : ""}vu ${ago(u.last_seen)} · ${u.n_events} événement${u.n_events > 1 ? "s" : ""}, ${u.n_tasks} tâche${u.n_tasks > 1 ? "s" : ""}, ${u.n_acts} séance${u.n_acts > 1 ? "s" : ""}</small>
       ${PERM_DEFS.map(([k, l]) => permRow((u.perms || {})[k] !== false, `data-act="perm-toggle" data-id="${u.id}" data-k="${k}"`, l)).join("")}
       <div class="btn-line">${u.partner ? `<button class="btn small" data-act="lnk-del" data-id="${u.id}">Délier</button>` : ""}<button class="btn small ${u.status === "blocked" ? "primary" : "danger"}" data-act="usr-status" data-id="${u.id}" data-s="${u.status === "blocked" ? "active" : "blocked"}">${u.status === "blocked" ? "Rétablir l'accès" : "Suspendre l'accès"}</button></div></div>`).join("");
   const alertsHtml = (ad.alerts || []).length ? `<div class="card alertcard"><h3>⚠️ À surveiller</h3>${ad.alerts.map((x) => `<div class="al">${esc(x)}</div>`).join("")}</div>` : `<div class="card"><h3>✅ Tout va bien</h3><small class="muted">Synchros à jour · base de données : ${ad.db_mb ?? "?"} Mo sur 500 Mo.</small></div>`;
   return `<div class="head"><div><h1>Administration</h1><div class="sub">Accès, invitations et droits</div></div><button class="btn small" data-act="admin-close">← Réglages</button></div>
     ${alertsHtml}
-    ${pend.length ? `<div class="card"><h3>Demandes de compte (${pend.length})</h3><p class="muted">Ces personnes ont utilisé un lien d'invitation. Elles ne peuvent rien faire tant que tu n'as pas accepté.</p>${pendHtml}</div>` : ""}
+    ${pend.length ? `<div class="card"><h3>Demandes de compte (${pend.length})</h3><p class="muted">Ces personnes ont utilisé un lien d'invitation ou ont demandé un accès depuis la page de connexion. Elles ne voient rien tant que tu n'as pas accepté.</p>${pendHtml}</div>` : ""}
     <div class="card"><h3>Inviter quelqu'un</h3>
-      <p class="muted">Crée un lien à envoyer. La personne choisit son prénom, son e-mail et son code, puis tu valides sa demande ici avant qu'elle puisse entrer. Le lien est valable 7 jours et ne sert qu'une fois.</p>
+      <p class="muted">Crée un lien à envoyer. La personne choisit son pseudo, son e-mail et son mot de passe, puis tu valides sa demande ici avant qu'elle puisse entrer. Le lien est valable 7 jours et ne sert qu'une fois.</p>
       <input id="invLabel" maxlength="40" placeholder="Pour qui ? (juste pour toi, ex. Maman)" style="width:100%;margin-bottom:8px">
       ${PERM_DEFS.map(([k, l]) => permRow(dp[k] !== false, `data-act="inv-perm" data-k="${k}"`, l)).join("")}
       <div class="btn-line"><button class="btn small primary" data-act="inv-create">Créer le lien d'invitation</button></div>
       ${invs ? `<h4 class="subh">Invitations en attente</h4>${invs}` : ""}</div>
     <div class="card"><h3>Créer un compte</h3>
-      <p class="muted">Pour quelqu'un qui n'a pas de lien : tu choisis son identifiant et son code (6 à 12 chiffres). Il aura son espace perso, sans accès à celui de Nelson et Sophie.</p>
-      ${ui.newAcc ? `<div class="okbox">✅ Compte créé pour <b>${esc(ui.newAcc.name)}</b><br>Identifiant : <b>${esc(ui.newAcc.login)}</b> · Code : <b>${esc(ui.newAcc.pin)}</b><br><small>Note-le maintenant : le code ne sera plus affiché.</small></div>` : ""}
-      <input id="acName" maxlength="24" placeholder="Prénom (ex. Marie)" autocomplete="off">
-      <input id="acLogin" maxlength="40" placeholder="Identifiant (ex. marie.d)" autocomplete="off" autocapitalize="off" style="margin-top:8px">
-      <input id="acPin" maxlength="12" inputmode="numeric" placeholder="Code (6 à 12 chiffres)" autocomplete="off" style="margin-top:8px">
+      <p class="muted">Tu choisis seulement le nom de compte et le mot de passe (6 à 12 chiffres). À sa première connexion, la personne devra choisir son pseudo (c'est lui que tu verras ici). Elle aura son espace perso, sans accès à celui de Nelson et Sophie.</p>
+      ${ui.newAcc ? `<div class="okbox">✅ Compte créé<br>Nom de compte : <b>${esc(ui.newAcc.login)}</b> · Mot de passe : <b>${esc(ui.newAcc.pin)}</b><br><small>Note-le maintenant : le mot de passe ne sera plus affiché.</small></div>` : ""}
+      <input id="acLogin" maxlength="40" placeholder="Nom de compte (ex. marie.d)" autocomplete="off" autocapitalize="off">
+      <input id="acPin" maxlength="12" inputmode="numeric" placeholder="Mot de passe (6 à 12 chiffres)" autocomplete="off" style="margin-top:8px">
       <p class="lg-err" id="acErr"></p>
       <div class="btn-line"><button class="btn small primary" data-act="acc-create">Créer le compte</button></div></div>
     <div class="card"><h3>Lier deux personnes</h3>
@@ -1290,14 +1310,18 @@ document.addEventListener("click", (ev) => {
       rpc("revoke_invite", { p_token: token, p_code: el.dataset.code }).then(() => { toast("Invitation annulée"); loadAdmin(); }).catch(() => toast("Action impossible"));
       break;
     case "acc-create": {
-      const nm = $("#acName").value.trim(), lg = $("#acLogin").value.trim(), pin = $("#acPin").value.trim(), er = $("#acErr");
+      const lg = $("#acLogin").value.trim().toLowerCase(), pin = $("#acPin").value.trim(), er = $("#acErr");
       er.textContent = "";
-      if (nm.length < 2 || lg.length < 3) { er.textContent = "Saisis un prénom et un identifiant (3 caractères minimum)."; break; }
-      if (!/^\d{6,12}$/.test(pin)) { er.textContent = "Le code doit faire 6 à 12 chiffres."; break; }
+      if (!lg) { er.textContent = "Saisis un nom de compte."; break; }
+      if (lg.length < 3) { er.textContent = "Nom de compte trop court (3 caractères minimum)."; break; }
+      if (!/^[a-z0-9._@+-]+$/.test(lg)) { er.textContent = "Nom de compte : lettres, chiffres, point, tiret, @ seulement, sans espace."; break; }
+      if (!pin) { er.textContent = "Saisis un mot de passe."; break; }
+      if (!/^\d+$/.test(pin)) { er.textContent = "Le mot de passe ne doit contenir que des chiffres."; break; }
+      if (pin.length < 6) { er.textContent = "Mot de passe : 6 chiffres minimum."; break; }
       el.disabled = true;
-      rpc("create_account", { p_token: token, p_name: nm, p_login: lg, p_pin: pin }).then((r) => {
+      rpc("create_account", { p_token: token, p_login: lg, p_pin: pin }).then((r) => {
         if (r?.error) { er.textContent = r.error; el.disabled = false; return; }
-        ui.newAcc = { name: nm, login: lg.toLowerCase(), pin }; loadAdmin(); toast("Compte créé");
+        ui.newAcc = { login: lg, pin }; loadAdmin(); toast("Compte créé");
       }).catch(() => { er.textContent = "Création impossible."; el.disabled = false; });
       break;
     }
@@ -1544,15 +1568,25 @@ document.addEventListener("click", (ev) => {
     case "signup": {
       const nm = $("#suName").value.trim(), em = $("#suMail").value.trim(), p1 = $("#suPin").value, p2 = $("#suPin2").value, err = $("#lgErr");
       err.textContent = "";
-      if (nm.length < 2 || !em) { err.textContent = "Saisis ton prénom et ton e-mail."; break; }
-      if (!/^\d{6,12}$/.test(p1)) { err.textContent = "Le code doit faire 6 à 12 chiffres."; break; }
-      if (p1 !== p2) { err.textContent = "Les deux codes ne sont pas identiques."; break; }
+      const pe = pseudoErr(nm); if (pe) { err.textContent = pe; break; }
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) { err.textContent = "E-mail invalide."; break; }
+      if (!/^\d{6,12}$/.test(p1)) { err.textContent = "Le mot de passe doit faire 6 à 12 chiffres, uniquement des chiffres."; break; }
+      if (p1 !== p2) { err.textContent = "Les deux mots de passe ne sont pas identiques."; break; }
       el.disabled = true;
-      rpc("claim_invite", { p_code: INVITE, p_name: nm, p_email: em, p_pin: p1 }).then((r) => {
-        if (r?.pending) { $(".login-box").innerHTML = `<h1>iwi2me</h1><p>✅ <b>Demande envoyée.</b></p><p class="muted">Ton compte doit être validé par Nelson. Dès que c'est fait, tu pourras te connecter avec ton e-mail et ton code.</p><p style="margin-top:14px"><a href="${location.pathname}">Aller à la connexion</a></p>`; }
-        else if (r?.token) { try { localStorage.setItem(TOKEN_KEY, r.token); } catch (e) {} location.replace(location.pathname); }
+      (INVITE ? rpc("claim_invite", { p_code: INVITE, p_name: nm, p_email: em, p_pin: p1 }) : rpc("request_access", { p_pseudo: nm, p_email: em, p_pin: p1 })).then((r) => {
+        if (r?.pending) { $(".login-box").innerHTML = `<h1>iwi2me</h1><p>✅ <b>Demande envoyée.</b></p><p class="muted">Ton compte doit être validé par Nelson. Dès que c'est fait, tu pourras te connecter avec ton e-mail et ton mot de passe.</p><p style="margin-top:14px"><a href="${location.pathname}">Aller à la connexion</a></p>`; }
         else { err.textContent = r?.error || "Création impossible."; el.disabled = false; }
       }).catch(() => { err.textContent = "Création impossible, vérifie ta connexion internet."; el.disabled = false; });
+      break;
+    }
+    case "pseudo-save": {
+      const nm = $("#psName").value.trim(), err = $("#lgErr"); err.textContent = "";
+      const pe = pseudoErr(nm); if (pe) { err.textContent = pe; break; }
+      el.disabled = true;
+      rpc("set_pseudo", { p_token: token, p_pseudo: nm }).then((r) => {
+        if (r?.error) { err.textContent = r.error; el.disabled = false; return; }
+        needPseudo = false; lastSnap = ""; pull();
+      }).catch(() => { err.textContent = "Connexion impossible."; el.disabled = false; });
       break;
     }
     case "login": {
@@ -1687,6 +1721,7 @@ async function pull() {
     if (inflight) return; // une écriture a démarré pendant la lecture : on garde l'état local
     const snap = JSON.stringify(d);
     if (Array.isArray(d.me.couple)) PAIR = d.me.couple;
+    needPseudo = !!d.me.need_pseudo;
     me = d.me.id; isAdmin = !!d.me.admin; gShared = !!d.me.gcal_shared; hevyOn = !!d.me.hevy; hevySyncAt = d.me.hevy_sync || null;
     const first = !loaded;
     if (Date.now() - lastPing > 300000) { lastPing = Date.now(); rpc("ping", { p_token: token }).catch(() => {}); }

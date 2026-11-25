@@ -1325,3 +1325,184 @@ revoke all on function _cp(text), _samecp(text,text), _second(text), _couple(tex
   set_progress(uuid,text,int), get_sport(uuid), get_data(uuid), get_admin(uuid), _profiles_visible(profiles) from public;
 grant execute on function create_account(uuid,text,text,text), link_profiles(uuid,text,text), unlink_profile(uuid,text), set_progress(uuid,text,int), get_sport(uuid), get_data(uuid), get_admin(uuid) to anon, authenticated;
 
+
+-- ============ Migration 18 : pseudo obligatoire, comptes par nom de compte, durcissement ============
+
+alter table profiles add column if not exists need_pseudo boolean not null default false;
+
+create or replace function _pseudo_ok(p text) returns boolean
+language sql immutable as $$
+  select coalesce(p, '') ~ '^[A-Za-zÀ-ÖØ-öø-ÿ0-9._-]{3,20}$' and lower(p) not in ('nelson','sophie','admin','administrateur','iwi2me');
+$$;
+create or replace function _pseudo_err(p text, p_self text) returns text
+language sql stable security definer set search_path = public as $$
+  select case
+    when coalesce(p, '') = '' then 'Choisis un pseudo.'
+    when char_length(p) < 3 then 'Pseudo trop court (3 caractères minimum).'
+    when char_length(p) > 20 then 'Pseudo trop long (20 caractères maximum).'
+    when p ~ '\s' then 'Pas d''espace dans le pseudo.'
+    when p !~ '^[A-Za-zÀ-ÖØ-öø-ÿ0-9._-]+$' then 'Pseudo : lettres (accents possibles), chiffres, point, tiret et underscore seulement.'
+    when not _pseudo_ok(p) then 'Ce pseudo n''est pas disponible.'
+    when exists (select 1 from profiles where lower(name) = lower(p) and id <> coalesce(p_self, '')) then 'Ce pseudo est déjà pris.'
+    else null end;
+$$;
+
+drop function if exists create_account(uuid,text,text,text);
+
+create or replace function create_account(p_token uuid, p_login text, p_pin text) returns json
+language plpgsql security definer set search_path = public, extensions as $$
+declare me profiles := _me(p_token); lg text := lower(trim(coalesce(p_login, ''))); pid text; np profiles; pal text[] := array['#4DB8FF','#FF7AC8','#FFD54D','#B28CFF','#5EEAD4','#FF9F6B']; n int;
+begin
+  if me.id is null or not me.is_admin then raise exception 'réservé à l''admin'; end if;
+  if lg = '' then return json_build_object('error', 'Saisis un nom de compte.'); end if;
+  if char_length(lg) < 3 then return json_build_object('error', 'Nom de compte trop court (3 caractères minimum).'); end if;
+  if char_length(lg) > 40 then return json_build_object('error', 'Nom de compte trop long (40 caractères maximum).'); end if;
+  if lg !~ '^[a-z0-9._@+-]+$' then return json_build_object('error', 'Nom de compte : lettres, chiffres, point, tiret, @ seulement, sans espace.'); end if;
+  if coalesce(p_pin, '') = '' then return json_build_object('error', 'Saisis un mot de passe.'); end if;
+  if p_pin !~ '^[0-9]+$' then return json_build_object('error', 'Le mot de passe ne doit contenir que des chiffres.'); end if;
+  if char_length(p_pin) < 6 then return json_build_object('error', 'Mot de passe : 6 chiffres minimum.'); end if;
+  if char_length(p_pin) > 12 then return json_build_object('error', 'Mot de passe : 12 chiffres maximum.'); end if;
+  if exists (select 1 from profiles where lower(email) = lg) then return json_build_object('error', 'Ce nom de compte existe déjà.'); end if;
+  pid := 'u-' || substr(md5(random()::text || clock_timestamp()::text), 1, 8);
+  select count(*) into n from profiles;
+  insert into profiles(id, name, color, email, pin_hash, perms, status, need_pseudo) values (pid, 'Nouveau', pal[1 + n % 6], lg, crypt(p_pin, gen_salt('bf')), '{}'::jsonb, 'active', true) returning * into np;
+  return json_build_object('id', np.id);
+end $$;
+
+create or replace function set_pseudo(p_token uuid, p_pseudo text) returns json
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token); pz text := trim(coalesce(p_pseudo, '')); er text;
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  if not me.need_pseudo then return json_build_object('error', 'Ton pseudo est déjà choisi.'); end if;
+  er := _pseudo_err(pz, me.id);
+  if er is not null then return json_build_object('error', er); end if;
+  update profiles set name = pz, need_pseudo = false where id = me.id;
+  return json_build_object('ok', true);
+end $$;
+
+create or replace function claim_invite(p_code uuid, p_name text, p_email text, p_pin text) returns json
+language plpgsql security definer set search_path = public, extensions as $$
+declare inv invites; np profiles; nm text := trim(coalesce(p_name, '')); pe text; em text := lower(trim(coalesce(p_email, ''))); pid text; pal text[] := array['#4DB8FF','#FF7AC8','#FFD54D','#B28CFF','#5EEAD4','#FF9F6B']; n int;
+begin
+  select * into inv from invites where code = p_code and used_by is null and expires_at > now() for update;
+  if inv.code is null then return json_build_object('error', 'Ce lien d''invitation n''est plus valide.'); end if;
+  pe := _pseudo_err(nm, null); if pe is not null then return json_build_object('error', pe); end if;
+  if em !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then return json_build_object('error', 'E-mail invalide.'); end if;
+  if coalesce(p_pin, '') !~ '^[0-9]{6,12}$' then return json_build_object('error', 'Le code doit faire 6 à 12 chiffres.'); end if;
+  if exists (select 1 from profiles where lower(email) = em) then return json_build_object('error', 'Cet e-mail a déjà un compte : connecte-toi.'); end if;
+  pid := 'u-' || substr(md5(random()::text || clock_timestamp()::text), 1, 8);
+  select count(*) into n from profiles;
+  insert into profiles(id, name, color, email, pin_hash, perms, status, requested_at) values (pid, nm, pal[1 + n % 6], em, crypt(p_pin, gen_salt('bf')), inv.perms, 'pending', now()) returning * into np;
+  update invites set used_by = np.id where code = inv.code;
+  return json_build_object('pending', true, 'id', np.id);
+end $$;
+
+create or replace function get_data(p_token uuid) returns json
+language plpgsql stable security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  return json_build_object(
+    'me', json_build_object('id', me.id, 'name', me.name, 'admin', me.is_admin, 'gcal_shared', me.gcal_shared,
+                            'hevy', exists(select 1 from hevy_keys where profile_id = me.id),
+                            'hevy_sync', (select synced_at from hevy_keys where profile_id = me.id), 'couple', _couple(me.id), 'need_pseudo', me.need_pseudo),
+    'profiles', _profiles_visible(me),
+    'events', coalesce((select json_agg(json_build_object('id',id,'title',title,'date',date,'time',time,'owner',owner,'scope',scope,'meta',meta))
+                        from events where owner = me.id or (scope = 'commun' and _samecp(me.id, owner))), '[]'::json),
+    'tasks',  coalesce((select json_agg(json_build_object('id',id,'title',title,'period',period,'key',key,'progress',progress,'progress_b',progress_b,'owner',owner,'scope',scope))
+                        from tasks  where owner = me.id or (scope = 'commun' and _samecp(me.id, owner))), '[]'::json),
+    'gcal',   coalesce((select json_agg(json_build_object('id',g.id,'title',g.title,'date',g.date,'time',g.time,'owner',g.owner))
+                        from gcal_events g join profiles pr on pr.id = g.owner
+                        where _samecp(me.id, g.owner) and (g.owner = me.id or pr.gcal_shared)), '[]'::json),
+    'workouts', coalesce((select json_agg(json_build_object('id',w.id,'owner',w.profile_id,'title',w.title,'day',w.day,'start',w.start_time,'end',w.end_time,'sets',w.n_sets,'vol',w.volume,'ex',w.ex) order by w.start_time desc)
+                        from workouts w
+                        where w.day >= current_date - 400 and (w.profile_id = me.id or (_samecp(me.id, w.profile_id)))), '[]'::json)
+  );
+end $$;
+
+create or replace function get_admin(p_token uuid) returns json
+language plpgsql stable security definer set search_path = public as $$
+declare me profiles := _me(p_token); al jsonb := '[]'::jsonb; np int; r record; mb numeric;
+begin
+  if me.id is null or not me.is_admin then raise exception 'réservé à l''admin'; end if;
+  select count(*) into np from profiles where status = 'pending';
+  if np > 0 then al := al || jsonb_build_array(np || ' demande(s) de compte à valider'); end if;
+  for r in select p.name, k.synced_at from hevy_keys k join profiles p on p.id = k.profile_id where k.synced_at is null or k.synced_at < now() - interval '36 hours' loop
+    al := al || jsonb_build_array('Synchro Hevy ancienne ou jamais faite pour ' || r.name);
+  end loop;
+  for r in select p.name, k.provider from watch_keys k join profiles p on p.id = k.profile_id where (k.refresh_token is not null or k.api_key is not null) and (k.synced_at is null or k.synced_at < now() - interval '36 hours') loop
+    al := al || jsonb_build_array('Synchro ' || r.provider || ' ancienne pour ' || r.name);
+  end loop;
+  mb := round(pg_database_size(current_database()) / 1048576.0, 1);
+  if mb > 400 then al := al || jsonb_build_array('Base de données à ' || mb || ' Mo sur 500 Mo (plan gratuit)'); end if;
+  return json_build_object(
+    'alerts', al, 'db_mb', mb,
+    'users', coalesce((select json_agg(json_build_object('id', p.id, 'name', p.name, 'color', p.color, 'perms', p.perms, 'created', p.created_at, 'status', p.status,
+                         'need_pseudo', p.need_pseudo, 'partner', (select q.name from profiles q where q.id = p.partner), 'last_login', p.last_login, 'last_seen', p.last_seen, 'requested', p.requested_at,
+                         'n_events', (select count(*) from events e where e.owner = p.id), 'n_tasks', (select count(*) from tasks t where t.owner = p.id),
+                         'n_acts', (select count(*) from activities a where a.profile_id = p.id) + (select count(*) from workouts w where w.profile_id = p.id)) order by p.created_at)
+                       from profiles p where not _is_pair(p.id)), '[]'::json),
+    'invites', coalesce((select json_agg(json_build_object('code', code, 'label', label, 'perms', perms, 'expires', expires_at, 'used_by', used_by) order by created_at desc)
+                         from invites where used_by is null and expires_at > now()), '[]'::json));
+end $$;
+
+create or replace function upsert_event(p_token uuid, p_id text, p_title text, p_date date, p_time text, p_owner text, p_scope text, p_meta text default '')
+returns void language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null or not _can_write(me.id, p_owner, p_scope) then raise exception 'interdit'; end if;
+  if coalesce(p_id,'') !~ '^[A-Za-z0-9_-]{1,60}$' then raise exception 'invalide'; end if;
+  insert into events(id,title,date,time,owner,scope,created_by,meta) values (p_id,left(trim(coalesce(p_title,'')),200),p_date,left(coalesce(p_time,''),40),p_owner,p_scope,me.id,left(coalesce(p_meta,''),300))
+  on conflict (id) do update set title=excluded.title, date=excluded.date, time=excluded.time, meta=excluded.meta,
+      scope=excluded.scope, owner=excluded.owner, updated_at=now()
+    where _can_modify(me.id, events.owner, events.scope, events.created_by)
+      and (excluded.scope = 'commun' or events.scope = 'perso' or events.created_by = me.id or events.created_by is null);
+  delete from reminders_sent where event_id = p_id;
+end $$;
+
+create or replace function upsert_task(p_token uuid, p_id text, p_title text, p_period text, p_key text, p_progress int, p_owner text, p_scope text, p_progress_b int default 0)
+returns void language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null or not _can_write(me.id, p_owner, p_scope) then raise exception 'interdit'; end if;
+  if not _perm(me, 'tasks') then raise exception 'fonction désactivée'; end if;
+  if coalesce(p_id,'') !~ '^[A-Za-z0-9_-]{1,60}$' or p_period not in ('day','week','month','year') then raise exception 'invalide'; end if;
+  insert into tasks(id,title,period,key,progress,progress_b,owner,scope,created_by)
+  values (p_id,left(trim(coalesce(p_title,'')),200),p_period,p_key,greatest(0,least(100,coalesce(p_progress,0))),greatest(0,least(100,coalesce(p_progress_b,0))),p_owner,p_scope,me.id)
+  on conflict (id) do update set title=excluded.title, updated_at=now()
+    where _can_modify(me.id, tasks.owner, tasks.scope, tasks.created_by);
+end $$;
+
+create or replace function create_invite(p_token uuid, p_label text, p_perms jsonb) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token); c uuid; k text; clean jsonb := '{}'::jsonb;
+begin
+  if me.id is null or not me.is_admin then raise exception 'réservé à l''admin'; end if;
+  for k in select unnest(array['tasks','sport','astro','integrations']) loop
+    if p_perms ? k and jsonb_typeof(p_perms -> k) = 'boolean' then clean := clean || jsonb_build_object(k, p_perms -> k); end if;
+  end loop;
+  insert into invites(label, perms) values (left(trim(coalesce(p_label, '')), 40), clean) returning code into c;
+  return c;
+end $$;
+revoke all on function _pseudo_ok(text), _pseudo_err(text,text), create_account(uuid,text,text), set_pseudo(uuid,text), claim_invite(uuid,text,text,text), get_data(uuid), get_admin(uuid), upsert_event(uuid,text,text,date,text,text,text,text), upsert_task(uuid,text,text,text,text,int,text,text,int), create_invite(uuid,text,jsonb) from public;
+grant execute on function create_account(uuid,text,text), set_pseudo(uuid,text), claim_invite(uuid,text,text,text), get_data(uuid), get_admin(uuid), upsert_event(uuid,text,text,date,text,text,text,text), upsert_task(uuid,text,text,text,text,int,text,text,int), create_invite(uuid,text,jsonb) to anon, authenticated;
+
+
+-- 19. Demande d'accès sans invitation (profil en attente, invisible tant que l'admin n'a pas accepté)
+create or replace function request_access(p_pseudo text, p_email text, p_pin text) returns json
+language plpgsql security definer set search_path = public, extensions as $$
+declare nm text := trim(coalesce(p_pseudo, '')); pe text; em text := lower(trim(coalesce(p_email, ''))); pid text; pal text[] := array['#4DB8FF','#FF7AC8','#FFD54D','#B28CFF','#5EEAD4','#FF9F6B']; n int;
+begin
+  pe := _pseudo_err(nm, null); if pe is not null then return json_build_object('error', pe); end if;
+  if char_length(em) > 80 or em !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then return json_build_object('error', 'E-mail invalide.'); end if;
+  if coalesce(p_pin, '') !~ '^[0-9]{6,12}$' then return json_build_object('error', 'Le mot de passe doit faire 6 à 12 chiffres.'); end if;
+  if exists (select 1 from profiles where lower(email) = em) then return json_build_object('error', 'Cet e-mail a déjà un compte ou une demande en cours.'); end if;
+  if (select count(*) from profiles where status = 'pending') >= 30 then return json_build_object('error', 'Trop de demandes en attente, réessaie plus tard.'); end if;
+  pid := 'u-' || substr(md5(random()::text || clock_timestamp()::text), 1, 8);
+  select count(*) into n from profiles;
+  insert into profiles(id, name, color, email, pin_hash, perms, status, requested_at) values (pid, nm, pal[1 + n % 6], em, crypt(p_pin, gen_salt('bf')), '{}'::jsonb, 'pending', now());
+  return json_build_object('pending', true);
+end $$;
+revoke all on function request_access(text,text,text) from public;
+grant execute on function request_access(text,text,text) to anon, authenticated;
