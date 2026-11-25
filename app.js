@@ -271,7 +271,7 @@ function banners() {
   if (!cloud || viewing()) return "";
   const out = [], dis = ui.banDis || (ui.banDis = {});
   if (isAdmin && state.admin?.alerts?.length && !dis.adm) out.push(`<div class="banner warn"><div><b>⚠️ Admin</b>${state.admin.alerts.map((x) => `<small>${esc(x)}</small>`).join("")}</div><div class="bb"><button class="btn small" data-act="admin-open-tab">Voir</button><button class="x" data-act="ban-x" data-k="adm" aria-label="Masquer">×</button></div></div>`);
-  if (!permOff("sport") && !dis.goal) {
+  if (SPORT_HOME && !permOff("sport") && !dis.goal) {
     const dow = (new Date().getDay() + 6) % 7, st = weekStats(me, weekMon(toISO(new Date())));
     if (dow >= 4 && st.has && !st.ok) out.push(`<div class="banner"><div><b>🎯 Objectif sport de la semaine</b><small>${st.items.filter((i) => i.done < i.goal).map((i) => `${esc(i.label)} ${i.done}/${i.goal}`).join(" · ")}</small></div><div class="bb"><button class="x" data-act="ban-x" data-k="goal" aria-label="Masquer">×</button></div></div>`);
   }
@@ -294,7 +294,8 @@ function viewSignup() {
   </div>`;
 }
 // ---- Chatbot (petit, prive, supprime chaque jour a 23h59) ----
-const CHAT_ON = false; // activé quand le fournisseur d'IA est choisi et la clé configurée
+let CHAT_ON = false; // passe à true si le serveur confirme que la clé IA est configurée
+const SPORT_HOME = false; // carte « Sport » de la page d'accueil masquée pour l'instant (l'onglet Sport reste là)
 const chat = { open: false, msgs: [], busy: false, loaded: false };
 const chatFmt = (t) => esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>");
 function chatSync() {
@@ -320,6 +321,14 @@ function chatDraw() {
   lg.innerHTML = chat.msgs.length ? chat.msgs.map((m) => `<div class="cm ${m.role === "user" ? "me" : "bot"}">${chatFmt(m.content)}</div>`).join("") + (chat.busy ? `<div class="cm bot dots">…</div>` : "")
     : `<div class="chat-ex"><small>Pose une question, par exemple :</small>${ex.map((e) => `<button type="button" data-act="chat-ex" data-t="${esc(e)}">${esc(e)}</button>`).join("")}</div>`;
   lg.scrollTop = lg.scrollHeight;
+}
+async function chatProbe() {
+  if (!cloud || chat.probed) return; chat.probed = true;
+  try {
+    const r = await fetch(`${CFG.url}/functions/v1/hevy-sync`, { method: "POST", headers: { "Content-Type": "application/json", apikey: CFG.key }, body: JSON.stringify({ token, chat: "" }) });
+    const d = await r.json().catch(() => ({}));
+    if (d.ready) { CHAT_ON = true; chatSync(); }
+  } catch (e) { chat.probed = false; }
 }
 async function chatOpen() {
   chat.open = true; chatSync(); chatDraw();
@@ -665,7 +674,7 @@ function viewCalendar() {
         <div class="time">${persoView() ? mine(t) + "%" : t.scope === "commun" ? `${prof(PAIR[0])?.name[0] || "A"} ${t.progress}% · ${prof(PAIR[1])?.name[0] || "B"} ${t.progress_b || 0}%` : t.progress + "%"}</div>
       </div>`).join("")}</div>` : ""}
 
-    ${sportCard()}`;
+    ${SPORT_HOME ? sportCard() : ""}`;
 }
 
 // Liens Hevy / Strava de chacun (ouverts dans un nouvel onglet)
@@ -1805,7 +1814,7 @@ async function pull() {
       fixColors(state.profiles);
       if (!first) PERM_DEFS.forEach(([k, l]) => { if (prevPerms[k] !== false && (state.perms || {})[k] === false) toast(`L'admin a désactivé « ${l.replace(/^\S+\s/, "")} » pour ton profil`); });
       try { localStorage.setItem(CACHE_KEY, snap); } catch (e) {}
-      loaded = true;
+      loaded = true; chatProbe();
       if (first || !typing) render();
     }
     try { // une course enregistrée par la montre remplace la case cochée à la main le même jour

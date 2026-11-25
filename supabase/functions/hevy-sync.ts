@@ -170,6 +170,7 @@ Deno.serve(async (req) => {
     // Chatbot : IA gratuite (Gemini), limitee par personne cote base (chat_begin), historique prive purge chaque jour a 23h59
     if (typeof chat === "string") {
       const gk = Deno.env.get("GEMINI_API_KEY");
+      if (chat === "") return J({ ready: !!gk }); // sonde : le bouton n'apparait que si la cle est configuree
       if (!gk) return J({ error: "Le chatbot n'est pas encore active." }, 503);
       const { data: b, error: eb } = await db.rpc("chat_begin", { p_token: token, p_msg: chat });
       if (eb) return J({ error: "Chatbot indisponible." }, 500);
