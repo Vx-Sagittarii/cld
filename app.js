@@ -314,7 +314,13 @@ async function connectGoogle(silent) {
       if (r.error || !r.access_token) { toast("Connexion Google annulée"); return; }
       gcal.token = r.access_token; gcal.on = true; gcal.cache = {}; gcal.events = [];
       try { localStorage.setItem(GKEY, "1"); } catch (e) {}
-      toast("Google Agenda connecté"); render(); ensureGcal();
+      toast("Google Agenda connecté");
+      // Connexion = partage automatique avec l'autre (visible directement dans le calendrier)
+      if (cloud && isPair(me) && !gShared) {
+        gShared = true;
+        rpc("set_gcal_shared", { p_token: token, p_shared: true }).then(() => { gcal.cache = {}; ensureGcal(); }).catch(() => {});
+      }
+      render(); ensureGcal();
     }
   });
   client.requestAccessToken({ prompt: silent ? "" : "consent" });
@@ -706,11 +712,10 @@ function viewSettings() {
     <div class="card">
       <h3>Google Agenda</h3>
       <p class="muted">${!gReady()
-        ? "Affiche ton Google Agenda dans ton calendrier iwi2me (lecture seule). Cette fonction sera activée dès que la connexion Google aura été configurée."
+        ? "Cette fonction sera activée dès que la connexion Google aura été configurée."
         : gcal.on
-          ? (gShared ? `Connecté et partagé : ${esc(prof(partnerId())?.name || "l'autre")} voit tes événements Google (titre, date, heure) en lecture seule.` : "Connecté. Tes événements Google s'affichent dans ton calendrier, en lecture seule. Ils ne sont visibles que par toi.")
-          : "Affiche ton Google Agenda dans ton calendrier (lecture seule). Chacun connecte le sien, et tu peux choisir de le partager avec l'autre."}</p>
-      ${cloud && isPair(me) && gReady() ? `<div class="btn-line"><button class="btn small ${gShared ? "" : "primary"}" data-act="gcal-share">${gShared ? "Arrêter de partager mon agenda" : "Partager mon agenda avec " + esc(prof(partnerId())?.name || "l'autre")}</button></div>` : ""}
+          ? "Connecté. Tes événements Google s'affichent directement dans le calendrier (lecture seule)."
+          : "Connecte ton Google Agenda : tes événements apparaissent directement dans le calendrier (lecture seule)."}</p>
       ${gReady() ? `<div class="btn-line">${gcal.on
         ? `<button class="btn small danger" data-act="gcal-disconnect">Déconnecter Google Agenda</button>`
         : `<button class="btn small" data-act="gcal-connect">Connecter mon Google Agenda</button>`}</div>` : ""}
