@@ -513,3 +513,38 @@ begin
       and (excluded.scope = 'commun' or events.scope = 'perso' or events.created_by = me.id or events.created_by is null);
   delete from reminders_sent where event_id = p_id;
 end $$;
+
+-- ============ Migration 9 : liens Hevy / Strava de chacun ============
+alter table profiles add column if not exists links jsonb not null default '{}'::jsonb;
+
+create or replace function set_links(p_token uuid, p_hevy text, p_strava text) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  if coalesce(p_hevy,'') <> '' and p_hevy !~ '^https://' then raise exception 'lien invalide'; end if;
+  if coalesce(p_strava,'') <> '' and p_strava !~ '^https://' then raise exception 'lien invalide'; end if;
+  update profiles set links = jsonb_build_object('hevy', coalesce(left(p_hevy,300),''), 'strava', coalesce(left(p_strava,300),'')) where id = me.id;
+end $$;
+revoke all on function set_links(uuid,text,text) from public;
+grant execute on function set_links(uuid,text,text) to anon, authenticated;
+
+create or replace function get_data(p_token uuid) returns json
+language plpgsql stable security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  return json_build_object(
+    'me', json_build_object('id', me.id, 'name', me.name, 'admin', me.is_admin, 'gcal_shared', me.gcal_shared),
+    'profiles', coalesce((select json_agg(json_build_object('id',id,'name',name,'color',color,'admin',is_admin,'links',links) order by created_at)
+                          from profiles
+                          where me.is_admin or id = me.id or (_is_pair(me.id) and _is_pair(id))), '[]'::json),
+    'events', coalesce((select json_agg(json_build_object('id',id,'title',title,'date',date,'time',time,'owner',owner,'scope',scope,'meta',meta))
+                        from events where owner = me.id or (scope = 'commun' and _is_pair(me.id))), '[]'::json),
+    'tasks',  coalesce((select json_agg(json_build_object('id',id,'title',title,'period',period,'key',key,'progress',progress,'progress_b',progress_b,'owner',owner,'scope',scope))
+                        from tasks  where owner = me.id or (scope = 'commun' and _is_pair(me.id))), '[]'::json),
+    'gcal',   coalesce((select json_agg(json_build_object('id',g.id,'title',g.title,'date',g.date,'time',g.time,'owner',g.owner))
+                        from gcal_events g join profiles pr on pr.id = g.owner
+                        where _is_pair(me.id) and _is_pair(g.owner) and (g.owner = me.id or pr.gcal_shared)), '[]'::json)
+  );
+end $$;

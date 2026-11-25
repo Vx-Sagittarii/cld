@@ -538,13 +538,30 @@ function viewCalendar() {
         <div class="time">${persoView() ? mine(t) + "%" : t.scope === "commun" ? `${prof("nelson")?.name[0] || "N"} ${t.progress}% · ${prof("sophie")?.name[0] || "S"} ${t.progress_b || 0}%` : t.progress + "%"}</div>
       </div>`).join("")}</div>` : ""}
 
-    <div class="card">
-      <h3>Sport</h3>
-      <div class="sport">
-        <div class="badge">🏋️</div>
-        <div><b>Pas encore connecté</b>Les séances Hevy et Strava de la journée apparaîtront ici.</div>
-      </div>
-    </div>`;
+    ${sportCard()}`;
+}
+
+// Liens Hevy / Strava de chacun (ouverts dans un nouvel onglet)
+const okUrl = (u) => typeof u === "string" && /^https:\/\//.test(u);
+function sportCard() {
+  const pair = state.profiles.filter((p) => isPair(p.id));
+  const btns = [];
+  pair.forEach((p) => {
+    const l = p.links || {};
+    if (okUrl(l.hevy)) btns.push(`<a class="btn small" href="${esc(l.hevy)}" target="_blank" rel="noopener">🏋️ Hevy · ${esc(p.name)}</a>`);
+    if (okUrl(l.strava)) btns.push(`<a class="btn small" href="${esc(l.strava)}" target="_blank" rel="noopener">🏃 Strava · ${esc(p.name)}</a>`);
+  });
+  return `<div class="card"><h3>Sport</h3>${btns.length
+    ? `<div class="btn-line" style="flex-wrap:wrap">${btns.join("")}</div>`
+    : `<div class="empty">Ajoute tes liens Hevy et Strava dans Réglages.</div>`}</div>`;
+}
+function linksCard() {
+  const l = prof(me)?.links || {};
+  return `<div class="card"><h3>Sport : mes liens</h3>
+    <p class="muted">Colle le lien de ton profil Hevy et de ton profil Strava. Ils apparaissent en bas du calendrier, pour toi et pour l'autre.</p>
+    <input id="lkHevy" type="url" placeholder="https://hevy.com/user/…" value="${esc(l.hevy || "")}" style="width:100%;margin:6px 0">
+    <input id="lkStrava" type="url" placeholder="https://www.strava.com/athletes/…" value="${esc(l.strava || "")}" style="width:100%;margin:6px 0">
+    <div class="btn-line"><button class="btn small primary" data-act="links-save">Enregistrer</button></div></div>`;
 }
 
 // ----- Tâches -----
@@ -720,6 +737,7 @@ function viewSettings() {
         ? `<button class="btn small danger" data-act="gcal-disconnect">Déconnecter Google Agenda</button>`
         : `<button class="btn small" data-act="gcal-connect">Connecter mon Google Agenda</button>`}</div>` : ""}
     </div>
+    ${cloud ? linksCard() : ""}
     ${pushCard()}
     <div class="card">
       <h3>Sauvegarde</h3>
@@ -905,6 +923,13 @@ document.addEventListener("click", (ev) => {
     }
     case "push-on": pushOn(); break;
     case "push-off": pushOff(); break;
+    case "links-save": {
+      const h = $("#lkHevy").value.trim(), st = $("#lkStrava").value.trim();
+      if ((h && !okUrl(h)) || (st && !okUrl(st))) { toast("Le lien doit commencer par https://"); break; }
+      const p = prof(me); if (p) p.links = { hevy: h, strava: st };
+      rpc("set_links", { p_token: token, p_hevy: h, p_strava: st }).then(() => toast("Liens enregistrés")).catch(() => toast("Enregistrement impossible"));
+      render(); break;
+    }
     case "gcal-connect": connectGoogle(false); break;
     case "gcal-connect-silent": connectGoogle(true); break;
     case "gcal-disconnect": disconnectGoogle(); break;
