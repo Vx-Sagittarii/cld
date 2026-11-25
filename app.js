@@ -630,9 +630,9 @@ function weekStats(who, mon) {
 }
 const hasPole = (who, iso) => hasLog(who, iso, "pole");
 const sumTxt = (r) => r.items.map((i) => `${i.label.replace(/^\S+\s/, "")} ${i.done}/${i.goal}`).join(", ");
-function goalBar(label, done, goal, color) {
+function goalBar(label, done, goal, color, dropK) {
   const pct = goal ? Math.min(100, Math.round((done / goal) * 100)) : 0, ok = goal && done >= goal;
-  return `<div class="grow"><span>${label}</span><div class="mbar"><i style="width:${pct}%;--c:${ok ? "#3DDC97" : color}"></i></div><em class="${ok ? "ok" : ""}">${done} / ${goal}${ok ? " ✓" : ""}</em></div>`;
+  return `<div class="grow"><span>${label}${dropK ? ` <button type="button" class="del-mini" data-act="goal-drop" data-k="${dropK}" aria-label="Retirer cette activité de mon objectif">×</button>` : ""}</span><div class="mbar"><i style="width:${pct}%;--c:${ok ? "#3DDC97" : color}"></i></div><em class="${ok ? "ok" : ""}">${done} / ${goal}${ok ? " ✓" : ""}</em></div>`;
 }
 // Boutons « ce jour-là j'ai fait… » (course, pole dance, activités perso) ; chez l'autre : simple affichage
 function manualBtns(who, iso) {
@@ -648,7 +648,7 @@ function sportGoalCard(who) {
   if (!st.has) body = `<div class="empty">${own ? "Pas encore d'objectif sport." : "Aucun objectif défini."}</div>`;
   else {
     const left = 7 - ((new Date().getDay() + 6) % 7) - 1;
-    body = st.items.map((i) => goalBar(i.label, i.done, i.goal, col)).join("")
+    body = st.items.map((i) => goalBar(i.label, i.done, i.goal, col, own ? i.k : "")).join("")
       + `<small class="muted">${st.ok ? "Objectif de la semaine atteint 🎉" : left > 0 ? `Encore ${left} jour${left > 1 ? "s" : ""} pour y arriver` : "Dernier jour de la semaine"}</small>`;
   }
   const hist = [];
@@ -691,7 +691,9 @@ function sportCard() {
   const myW = (state.workouts || []).filter((w) => w.owner === who && w.day === day);
   const myA = (state.acts || []).filter((a) => a.owner === who && lday(a) === day);
   const used = new Set();
-  const rows = kindsOf(who).map(([k, label]) => {
+  const tg = targetsOf(goalFor(who, weekMon(toISO(new Date())))), hasGoal = Object.values(tg).some((v) => v > 0);
+  const seen = (k) => k === "gym" ? myW.length > 0 : k === "run" ? (myA.some((a) => RUN_RE.test(String(a.kind || "").toLowerCase())) || hasLog(who, day, k)) : hasLog(who, day, k);
+  const rows = kindsOf(who).filter(([k]) => !hasGoal || (tg[k] || 0) > 0 || seen(k)).map(([k, label]) => {
     if (k === "gym") {
       const det = myW.map((w) => { const u = hevyUrl(w.owner); const t = `🏋️ ${esc(w.title)}`; return `${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${t} ↗ Hevy</a>` : t} · ${[fmtDur(w.start, w.end), w.ex.length + (w.ex.length > 1 ? " exos" : " exo"), w.sets + (w.sets > 1 ? " séries" : " série"), w.vol ? fmtVol(w.vol) : ""].filter(Boolean).join(" · ")}`; });
       return chkRow(label, myW.length > 0, { details: det });
@@ -1228,7 +1230,7 @@ document.addEventListener("click", (ev) => {
   if (el.classList.contains("tab")) { ui.tab = el.dataset.tab; render(true); window.scrollTo(0, 0); return; }
 
   const act = el.dataset.act;
-  if (viewing() && ["new-event", "edit-event", "del-event", "new-task", "del-task", "save-prog", "save-event", "save-task", "profile", "log-toggle", "goal-set", "goal-save", "custom-add", "custom-del", "hevy-refresh", "watch-sync", "watch-remove", "strava-save", "garmin-save"].includes(act)) { toast("Lecture seule : tu consultes le profil de " + (prof(ui.viewAs)?.name || "l'autre")); return; }
+  if (viewing() && ["new-event", "edit-event", "del-event", "new-task", "del-task", "save-prog", "save-event", "save-task", "profile", "log-toggle", "goal-set", "goal-save", "goal-drop", "custom-add", "custom-del", "hevy-refresh", "watch-sync", "watch-remove", "strava-save", "garmin-save"].includes(act)) { toast("Lecture seule : tu consultes le profil de " + (prof(ui.viewAs)?.name || "l'autre")); return; }
   switch (act) {
     case "vis-switch": {
       const inp = document.getElementById(el.dataset.for), pub = inp.value !== el.dataset.pub;
@@ -1279,6 +1281,15 @@ document.addEventListener("click", (ev) => {
       state.goals = (state.goals || []).filter((g) => !(g.owner === me && String(g.from).slice(0, 10) === mon)).concat([{ owner: me, from: mon, targets: t, gym: t.gym || 0, pole: t.pole || 0 }]);
       ui.goalDraft = null; render(); lastSnap = "";
       rpc("set_sport_targets", { p_token: token, p_targets: t }).then(() => toast("Objectif enregistré 🎯")).catch(() => { toast("Enregistrement impossible"); pull(); });
+      break;
+    }
+    case "goal-drop": {
+      const k = el.dataset.k, lab = (kindsOf(me).find(([x]) => x === k) || [k, k])[1];
+      if (!confirm(`Retirer « ${lab.replace(/^\S+\s/, "")} » de ton objectif ? Tu ne la fais plus cette semaine.`)) break;
+      const mon = weekMon(toISO(new Date())), t = Object.assign({}, targetsOf(goalFor(me, mon)), { [k]: 0 });
+      state.goals = (state.goals || []).filter((g) => !(g.owner === me && String(g.from).slice(0, 10) === mon)).concat([{ owner: me, from: mon, targets: t, gym: t.gym || 0, pole: t.pole || 0 }]);
+      ui.goalDraft = null; render(); toast("Activité retirée de l'objectif");
+      push("set_sport_targets", { p_targets: t });
       break;
     }
     case "custom-add": {
@@ -1597,6 +1608,7 @@ render();
 
 // Charge les données du profil, puis rafraîchit régulièrement (pour voir ce que l'autre ajoute)
 let lastSnap = "";
+const dedup = new Set(); // jours déjà nettoyés (évite de réessayer en boucle hors connexion)
 async function pull() {
   if (inflight) return;
   try {
@@ -1618,6 +1630,10 @@ async function pull() {
       loaded = true;
       if (first || !typing) render();
     }
+    try { // une course enregistrée par la montre remplace la case cochée à la main le même jour
+      (state.logs || []).filter((l) => l.owner === me && l.kind === "run" && (state.acts || []).some((a) => a.owner === me && RUN_RE.test(String(a.kind || "").toLowerCase()) && lday(a) === lday(l)))
+        .forEach((l) => { state.logs = state.logs.filter((x) => x !== l); if (dedup.has(lday(l))) return; dedup.add(lday(l)); push("set_sport_log", { p_day: lday(l), p_kind: "run", p_on: false }); });
+    } catch (e) {}
     if (first) maybeImportLocal(d);
   } catch (e) {
     if (String(e.message).includes("lien invalide")) { // lien révoqué ou invalide
