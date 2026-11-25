@@ -32,19 +32,14 @@ function migrate(old) {
   return { profiles: structuredClone(defaultState.profiles), events: (old.events || []).map(fix), tasks: (old.tasks || []).map(fix) };
 }
 
-// ----- Mode en ligne : le lien personnel (…/#k=jeton) est gardé sur ce téléphone -----
+// ----- Mode en ligne : connexion par e-mail + code ; le jeton reçu est gardé sur cet appareil -----
 const TOKEN_KEY = "iwi2me-token", CACHE_KEY = "iwi2me-cache";
 const CFG = window.IWI_CONFIG || {};
-(function readLink() {
-  const m = location.hash.match(/k=([0-9a-f-]{36})/i);
-  if (m) {
-    try { localStorage.setItem(TOKEN_KEY, m[1]); } catch (e) {}
-    history.replaceState(null, "", location.pathname + location.search); // le jeton disparaît de la barre d'adresse
-  }
-})();
+if (location.hash.includes("k=")) history.replaceState(null, "", location.pathname + location.search); // anciens liens secrets : désactivés
 let token = null;
 try { token = localStorage.getItem(TOKEN_KEY); } catch (e) {}
 const cloud = !!(token && CFG.url && CFG.key);
+const needLogin = !token && !!(CFG.url && CFG.key); // pas de session : écran de connexion
 let loaded = !cloud;   // en ligne : on attend la première réponse de la base
 let isAdmin = false;
 
@@ -236,7 +231,21 @@ const hero = $("#hero");
 // ---------------------------------------------------------------
 // 4. VUES
 // ---------------------------------------------------------------
+function viewLogin() {
+  return `<div class="login-box">
+    <h1>iwi2me</h1>
+    <p class="muted">Connecte-toi pour retrouver ton espace.</p>
+    <div class="field"><label>E-mail</label><input id="lgMail" type="email" autocomplete="email" inputmode="email" autocapitalize="off"></div>
+    <div class="field"><label>Code</label><input id="lgPin" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="current-password"></div>
+    <p class="muted">Indice : devine</p>
+    <p class="lg-err" id="lgErr"></p>
+    <button class="btn" data-act="login">Se connecter</button>
+  </div>`;
+}
+
 function render(animate = false) {
+  document.body.classList.toggle("login", needLogin);
+  if (needLogin) { view.innerHTML = viewLogin(); hero.classList.add("off"); return; }
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("on", t.dataset.tab === ui.tab));
   renderHero();
   applySeason();
@@ -601,17 +610,14 @@ function viewSettings() {
       <div class="set-row"><i class="dot-lg" style="background:${p.color}"></i>
         <input data-pname="${p.id}" value="${esc(p.name)}" maxlength="24" ${lock || (cloud && !isAdmin && p.id !== me) ? "disabled" : ""}>
         ${p.admin || p.id === "nelson" ? `<span class="tag-admin">admin</span>` : ""}
-        ${cloud && isAdmin && p.id !== me ? `<button class="mini" data-act="copy-link" data-id="${p.id}">Lien</button>` : ""}
         ${!PAIR.includes(p.id) && (!cloud || isAdmin) ? `<button class="del" data-act="del-profile" data-id="${p.id}" aria-label="Supprimer">×</button>` : ""}
       </div>`).join("");
   const linkCard = cloud
-    ? (isAdmin ? `<div class="card"><h3>Liens personnels</h3>
-        <p class="muted">Chaque profil a son lien secret : la personne qui l'ouvre devient ce profil sur son téléphone. Envoie celui de Sophie à Sophie uniquement. Un lien régénéré invalide l'ancien.</p>
-        <div class="btn-line"><button class="btn small" data-act="copy-link" data-id="sophie">Copier le lien de Sophie</button></div>
-        <div class="btn-line"><button class="btn small" data-act="regen-link" data-id="sophie">Régénérer le lien de Sophie</button></div>
-        <div class="btn-line"><button class="btn small" data-act="copy-link" data-id="${me}">Copier mon lien (autre téléphone)</button></div></div>`
-      : `<div class="card"><h3>Ton espace</h3><p class="muted">Tu es connectée avec ton lien personnel. Ne le partage pas : il donne accès à ton calendrier.</p></div>`)
-    : `<div class="card"><h3>Mode sur ce téléphone</h3><p class="muted">Pour utiliser les calendriers à deux, ouvre ton lien personnel (celui que Nelson t'envoie, ou le sien).</p></div>`;
+    ? (isAdmin ? `<div class="card"><h3>Connexion</h3>
+        <p class="muted">Chacun se connecte avec son e-mail et un code numérique. Pour Sophie : envoie-lui l'adresse de l'appli ; elle saisit son e-mail et son code (indice affiché : « devine »). Son e-mail est enregistré à sa première connexion. Après 5 erreurs, la connexion est bloquée 15 minutes.</p>
+        <div class="btn-line"><button class="btn small" data-act="copy-app">Copier l'adresse de l'appli</button></div></div>`
+      : `<div class="card"><h3>Ton espace</h3><p class="muted">Tu es connectée avec ton e-mail et ton code. Ne les partage pas : ils donnent accès à ton calendrier.</p></div>`)
+    : `<div class="card"><h3>Mode sur ce téléphone</h3><p class="muted">Données enregistrées sur cet appareil uniquement.</p></div>`;
   return `
     <div class="head"><div><h1>Réglages</h1><div class="sub">Personnalise ton espace</div></div></div>
     <div class="card">
@@ -744,6 +750,7 @@ function openTaskSheet() {
 // ---------------------------------------------------------------
 // 6. ACTIONS (un seul écouteur de clics pour toute l'appli)
 // ---------------------------------------------------------------
+document.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.target.id && ["lgMail", "lgPin"].includes(ev.target.id)) document.querySelector("[data-act=login]")?.click(); });
 document.addEventListener("click", (ev) => {
   const el = ev.target.closest("[data-act], .tab");
   if (!el) return;
@@ -829,20 +836,24 @@ document.addEventListener("click", (ev) => {
       }
       break;
     }
-    case "copy-link": case "regen-link": {
-      const regen = act === "regen-link";
-      if (regen && !confirm("Régénérer ce lien ? L'ancien ne fonctionnera plus.")) break;
-      rpc("get_profile_link", { p_token: token, p_id: el.dataset.id, p_regenerate: regen })
-        .then(async (t) => {
-          const link = location.origin + location.pathname + "#k=" + t;
-          try { await navigator.clipboard.writeText(link); toast(regen ? "Nouveau lien copié" : "Lien copié"); }
-          catch (e) { prompt("Copie ce lien :", link); }
-        })
-        .catch(() => toast("Action réservée à l'admin"));
+    case "copy-app": {
+      const link = location.origin + location.pathname;
+      try { navigator.clipboard.writeText(link).then(() => toast("Adresse copiée")); } catch (e) { prompt("Copie cette adresse :", link); }
+      break;
+    }
+    case "login": {
+      const em = $("#lgMail").value.trim(), pin = $("#lgPin").value.trim(), err = $("#lgErr");
+      err.textContent = "";
+      if (!em || !pin) { err.textContent = "Saisis ton e-mail et ton code."; break; }
+      el.disabled = true;
+      rpc("login", { p_email: em, p_pin: pin }).then((r) => {
+        if (r?.token) { try { localStorage.setItem(TOKEN_KEY, r.token); } catch (e) {} location.reload(); }
+        else { err.textContent = r?.error || "Connexion impossible."; el.disabled = false; }
+      }).catch(() => { err.textContent = "Connexion impossible, vérifie ta connexion internet."; el.disabled = false; });
       break;
     }
     case "logout":
-      if (confirm("Se déconnecter de ce téléphone ? Tu pourras te reconnecter avec ton lien.")) { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(CACHE_KEY); location.reload(); }
+      if (confirm("Se déconnecter de cet appareil ? Tu pourras te reconnecter avec ton e-mail et ton code.")) { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(CACHE_KEY); location.reload(); }
       break;
     case "zoom": $("#photo").showModal(); break;
     case "export": exportData(); break;
@@ -973,7 +984,7 @@ async function pull() {
   } catch (e) {
     if (String(e.message).includes("lien invalide")) { // lien révoqué ou invalide
       localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(CACHE_KEY);
-      alert("Ce lien n'est plus valide. Demande un nouveau lien à Nelson."); location.reload(); return;
+      alert("Session expirée : reconnecte-toi avec ton e-mail et ton code."); location.reload(); return;
     }
     if (!loaded) { // hors connexion : dernière version connue
       try { const d = JSON.parse(localStorage.getItem(CACHE_KEY)); if (d) { me = d.me.id; isAdmin = !!d.me.admin; state.profiles = d.profiles; state.events = d.events; state.tasks = d.tasks; loaded = true; render(); toast("Hors connexion : dernière version affichée"); } } catch (x) {}
@@ -988,11 +999,13 @@ function startCloud() {
 
 // Première connexion de Nelson : propose d'envoyer en ligne ce qui était déjà sur le téléphone
 function maybeImportLocal(d) {
-  if (d.me.id !== "nelson" || d.events.length || d.tasks.length) return;
+  if (d.me.id !== "nelson") return;
   try {
+    if (localStorage.getItem("iwi2me-import-asked")) return;
     const raw = localStorage.getItem(KEY); if (!raw) return;
     const old = JSON.parse(raw);
     if (!old.events?.length && !old.tasks?.length) return;
+    localStorage.setItem("iwi2me-import-asked", "1");
     if (!confirm(`Envoyer en ligne les ${old.events.length} événements et ${old.tasks.length} tâches de ce téléphone ?`)) return;
     old.events.forEach((e) => { state.events.push(e); push("upsert_event", evArgs(e)); });
     old.tasks.forEach((t) => { state.tasks.push(t); push("upsert_task", tkArgs(t)); });

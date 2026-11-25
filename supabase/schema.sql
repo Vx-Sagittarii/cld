@@ -312,3 +312,42 @@ revoke all on function upsert_event(uuid,text,text,date,text,text,text,text), up
   get_data(uuid), save_sub(uuid,text,text,text), delete_sub(uuid,text) from public;
 grant execute on function upsert_event(uuid,text,text,date,text,text,text,text), upsert_task(uuid,text,text,text,text,int,text,text,int),
   get_data(uuid), save_sub(uuid,text,text,text), delete_sub(uuid,text) to anon, authenticated;
+
+-- ============ Migration 4 : connexion par e-mail + code numérique ============
+-- Plus de lien secret : on se connecte avec son e-mail et un code. Le code n'est jamais stocké en clair
+-- (empreinte bcrypt). Après 5 erreurs, la connexion est bloquée 15 minutes.
+-- Si un profil n'a pas encore d'e-mail (cas de Sophie), le premier e-mail saisi avec le bon code est enregistré.
+alter table profiles add column if not exists email text, add column if not exists pin_hash text;
+
+create table if not exists login_throttle (k text primary key, fails int not null default 0, locked_until timestamptz);
+alter table login_throttle enable row level security;
+
+create or replace function login(p_email text, p_pin text) returns json
+language plpgsql security definer set search_path = public, extensions as $$
+declare p profiles; em text := lower(trim(coalesce(p_email, ''))); th login_throttle; kk text; nf int;
+begin
+  select * into p from profiles where lower(email) = em and pin_hash is not null;
+  kk := coalesce(p.id, '*nouveau');
+  select * into th from login_throttle where k = kk;
+  if th.locked_until is not null and th.locked_until > now() then
+    return json_build_object('error', 'Trop de tentatives, réessaie dans 15 minutes.');
+  end if;
+  if p.id is null and em like '%@%' then   -- premier accès d'un profil sans e-mail : on vérifie le code seul
+    select * into p from profiles where email is null and pin_hash is not null and pin_hash = crypt(coalesce(p_pin, ''), pin_hash) limit 1;
+    if p.id is not null then update profiles set email = em where id = p.id; end if;
+  elsif p.id is not null and p.pin_hash <> crypt(coalesce(p_pin, ''), p.pin_hash) then
+    p := null;
+  end if;
+  if p.id is null then
+    nf := case when th.k is null or (th.locked_until is not null and th.locked_until <= now()) then 1 else th.fails + 1 end;
+    insert into login_throttle(k, fails, locked_until) values (kk, nf, case when nf >= 5 then now() + interval '15 minutes' end)
+      on conflict (k) do update set fails = excluded.fails, locked_until = excluded.locked_until;
+    return json_build_object('error', 'E-mail ou code incorrect.');   -- pas d''exception : elle annulerait le compteur d''essais
+  end if;
+  delete from login_throttle where k = kk;
+  return json_build_object('token', p.token, 'id', p.id);
+end $$;
+
+drop function if exists get_profile_link(uuid, text, boolean);   -- plus de lien secret à distribuer
+revoke all on function login(text, text) from public;
+grant execute on function login(text, text) to anon, authenticated;
