@@ -543,17 +543,46 @@ function viewCalendar() {
 
 // Liens Hevy / Strava de chacun (ouverts dans un nouvel onglet)
 const okUrl = (u) => typeof u === "string" && /^https:\/\//.test(u);
+let hevyOn = false, hevyBusy = false;
+const fmtDur = (a, b) => { if (!a || !b) return ""; const m = Math.round((new Date(b) - new Date(a)) / 60000); return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}` : `${m} min`; };
+const fmtVol = (v) => v >= 1000 ? (Math.round(v / 100) / 10).toString().replace(".", ",") + " t" : v + " kg";
+// Appelle la fonction serveur qui copie les séances Hevy de la personne, puis recharge les données
+async function syncHevy(manual) {
+  if (!cloud || hevyBusy) return;
+  const last = Number(sessionStorage.getItem("iwi2me-hevy-sync") || 0);
+  if (!manual && Date.now() - last < 10 * 60 * 1000) return; // au plus une synchro toutes les 10 min en automatique
+  hevyBusy = true; if (manual) { toast("Synchronisation Hevy…"); }
+  try {
+    const r = await fetch(`${CFG.url}/functions/v1/hevy-sync`, { method: "POST", headers: { "Content-Type": "application/json", apikey: CFG.key }, body: JSON.stringify({ token, full: !!manual }) });
+    const d = await r.json();
+    if (d.ok) { try { sessionStorage.setItem("iwi2me-hevy-sync", String(Date.now())); } catch (e) {} lastSnap = ""; await pull(); if (manual) toast(`Hevy à jour (${d.count} séance${d.count > 1 ? "s" : ""} lue${d.count > 1 ? "s" : ""})`); }
+    else if (manual) toast(d.error || "Synchronisation impossible");
+  } catch (e) { if (manual) toast("Synchronisation impossible pour le moment"); }
+  hevyBusy = false; if (manual) render();
+}
 function sportCard() {
   const pair = state.profiles.filter((p) => isPair(p.id));
+  const ws = (state.workouts || []).filter((w) => w.day === ui.selected && pair.some((p) => p.id === w.owner));
+  const wHtml = ws.length ? ws.map((w) => `
+    <div class="row"><div class="bar-owner" style="background:${prof(w.owner)?.color || "#888"}"></div>
+      <div class="t"><b>🏋️ ${esc(w.title)}</b><small>${esc(prof(w.owner)?.name || "")} · ${[fmtDur(w.start, w.end), w.ex.length + (w.ex.length > 1 ? " exos" : " exo"), w.sets + (w.sets > 1 ? " séries" : " série"), w.vol ? fmtVol(w.vol) : ""].filter(Boolean).join(" · ")}</small>
+      <small>${w.ex.slice(0, 6).map((e) => esc(e.t) + " ×" + e.s).join(" · ")}${w.ex.length > 6 ? " …" : ""}</small></div></div>`).join("")
+    : `<div class="empty">${hevyOn || pair.some((p) => p.id !== me) ? "Aucune séance ce jour-là." : "Connecte Hevy dans Réglages pour voir tes séances ici."}</div>`;
   const btns = [];
   pair.forEach((p) => {
     const l = p.links || {};
     if (okUrl(l.hevy)) btns.push(`<a class="btn small" href="${esc(l.hevy)}" target="_blank" rel="noopener">🏋️ Hevy · ${esc(p.name)}</a>`);
     if (okUrl(l.strava)) btns.push(`<a class="btn small" href="${esc(l.strava)}" target="_blank" rel="noopener">🏃 Strava · ${esc(p.name)}</a>`);
   });
-  return `<div class="card"><h3>Sport</h3>${btns.length
-    ? `<div class="btn-line" style="flex-wrap:wrap">${btns.join("")}</div>`
-    : `<div class="empty">Ajoute tes liens Hevy et Strava dans Réglages.</div>`}</div>`;
+  return `<div class="card"><h3>Sport</h3>${wHtml}${btns.length ? `<div class="btn-line" style="flex-wrap:wrap;margin-top:8px">${btns.join("")}</div>` : ""}</div>`;
+}
+function hevyCard() {
+  return `<div class="card"><h3>Hevy</h3>
+    <p class="muted">${hevyOn ? "Hevy est connecté : tes séances s'affichent dans la carte Sport du calendrier, et se mettent à jour à chaque ouverture de l'appli. L'autre les voit aussi." : "Connecte ton compte Hevy (il faut Hevy Pro). Dans Hevy, ouvre Réglages › Développeur pour générer une clé, puis colle-la ici."}</p>
+    ${hevyOn ? `<div class="btn-line"><button class="btn small primary" data-act="hevy-sync">Actualiser maintenant</button><button class="btn small danger" data-act="hevy-remove">Déconnecter Hevy</button></div>`
+      : `<div class="btn-line"><a class="btn small" href="https://hevy.com/settings?developer" target="_blank" rel="noopener">Obtenir ma clé Hevy</a></div>
+         <input id="hvKey" type="password" autocomplete="off" placeholder="Colle ta clé Hevy ici" style="width:100%;margin:8px 0">
+         <div class="btn-line"><button class="btn small primary" data-act="hevy-save">Connecter Hevy</button></div>`}</div>`;
 }
 function linksCard() {
   const l = prof(me)?.links || {};
@@ -737,7 +766,7 @@ function viewSettings() {
         ? `<button class="btn small danger" data-act="gcal-disconnect">Déconnecter Google Agenda</button>`
         : `<button class="btn small" data-act="gcal-connect">Connecter mon Google Agenda</button>`}</div>` : ""}
     </div>
-    ${cloud ? linksCard() : ""}
+    ${cloud ? hevyCard() + linksCard() : ""}
     ${pushCard()}
     <div class="card">
       <h3>Sauvegarde</h3>
@@ -923,6 +952,17 @@ document.addEventListener("click", (ev) => {
     }
     case "push-on": pushOn(); break;
     case "push-off": pushOff(); break;
+    case "hevy-save": {
+      const k = $("#hvKey").value.trim();
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(k)) { toast("Clé Hevy invalide (elle ressemble à xxxxxxxx-xxxx-…)"); break; }
+      rpc("set_hevy_key", { p_token: token, p_key: k }).then(async () => { hevyOn = true; $("#hvKey").value = ""; render(); await syncHevy(true); }).catch(() => toast("Enregistrement impossible"));
+      break;
+    }
+    case "hevy-sync": syncHevy(true); break;
+    case "hevy-remove":
+      if (!confirm("Déconnecter Hevy ? Tes séances copiées dans l'appli seront effacées.")) break;
+      rpc("set_hevy_key", { p_token: token, p_key: "" }).then(() => { hevyOn = false; state.workouts = (state.workouts || []).filter((w) => w.owner !== me); lastSnap = ""; render(); toast("Hevy déconnecté"); }).catch(() => toast("Action impossible"));
+      break;
     case "links-save": {
       const h = $("#lkHevy").value.trim(), st = $("#lkStrava").value.trim();
       if ((h && !okUrl(h)) || (st && !okUrl(st))) { toast("Le lien doit commencer par https://"); break; }
@@ -1121,13 +1161,13 @@ async function pull() {
   try {
     const d = await rpc("get_data", { p_token: token });
     const snap = JSON.stringify(d);
-    me = d.me.id; isAdmin = !!d.me.admin; gShared = !!d.me.gcal_shared;
+    me = d.me.id; isAdmin = !!d.me.admin; gShared = !!d.me.gcal_shared; hevyOn = !!d.me.hevy;
     const first = !loaded;
     if (snap !== lastSnap) {
       lastSnap = snap;
       const typing = sheet.open || document.activeElement?.matches?.("input, select"); // ne pas casser une saisie en cours
       const loc = new Map(state.tasks.filter((t) => pendingProg.has(t.id)).map((t) => [t.id, t]));
-      state.profiles = d.profiles; state.events = d.events; state.gcalShared = d.gcal || [];
+      state.profiles = d.profiles; state.events = d.events; state.gcalShared = d.gcal || []; state.workouts = d.workouts || [];
       // un % pas encore sauvegardé garde SA valeur locale (ma part), le reste vient de la base
       state.tasks = d.tasks.map((t) => { const l = loc.get(t.id); return l ? Object.assign({}, t, { [myField(t)]: l[myField(t)] }) : t; });
       fixColors(state.profiles);
@@ -1136,13 +1176,14 @@ async function pull() {
       if (first || !typing) render();
     }
     if (first) maybeImportLocal(d);
+    if (first && hevyOn) syncHevy(false); // met à jour les séances à chaque ouverture
   } catch (e) {
     if (String(e.message).includes("lien invalide")) { // lien révoqué ou invalide
       localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(CACHE_KEY);
       alert("Session expirée : reconnecte-toi avec ton e-mail et ton code."); location.reload(); return;
     }
     if (!loaded) { // hors connexion : dernière version connue
-      try { const d = JSON.parse(localStorage.getItem(CACHE_KEY)); if (d) { me = d.me.id; isAdmin = !!d.me.admin; gShared = !!d.me.gcal_shared; state.gcalShared = d.gcal || []; state.profiles = d.profiles; state.events = d.events; state.tasks = d.tasks; loaded = true; render(); toast("Hors connexion : dernière version affichée"); } } catch (x) {}
+      try { const d = JSON.parse(localStorage.getItem(CACHE_KEY)); if (d) { me = d.me.id; isAdmin = !!d.me.admin; gShared = !!d.me.gcal_shared; state.gcalShared = d.gcal || []; state.workouts = d.workouts || []; hevyOn = !!d.me.hevy; state.profiles = d.profiles; state.events = d.events; state.tasks = d.tasks; loaded = true; render(); toast("Hors connexion : dernière version affichée"); } } catch (x) {}
     }
   }
 }

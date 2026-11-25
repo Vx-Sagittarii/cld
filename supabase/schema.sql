@@ -548,3 +548,69 @@ begin
                         where _is_pair(me.id) and _is_pair(g.owner) and (g.owner = me.id or pr.gcal_shared)), '[]'::json)
   );
 end $$;
+
+-- ============ Migration 10 : séances Hevy ============
+-- La clé API Hevy de chacun est stockée dans une table verrouillée (aucune fonction ne la renvoie jamais).
+-- La synchro est faite par la fonction Edge "hevy-sync" (clé de service), qui remplit la table workouts.
+create table if not exists hevy_keys (
+  profile_id text primary key references profiles(id) on delete cascade,
+  api_key    text not null,
+  synced_at  timestamptz,
+  updated_at timestamptz not null default now()
+);
+create table if not exists workouts (
+  id         text primary key,
+  profile_id text not null references profiles(id) on delete cascade,
+  title      text not null default '',
+  day        date not null,
+  start_time timestamptz,
+  end_time   timestamptz,
+  n_sets     int not null default 0,
+  volume     int not null default 0,
+  ex         jsonb not null default '[]'::jsonb
+);
+create index if not exists workouts_day on workouts(day);
+alter table hevy_keys enable row level security;
+alter table workouts enable row level security;
+
+create or replace function set_hevy_key(p_token uuid, p_key text) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token); k text := trim(coalesce(p_key, ''));
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  if k = '' then
+    delete from hevy_keys where profile_id = me.id;
+    delete from workouts where profile_id = me.id;
+    return;
+  end if;
+  if k !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then raise exception 'clé invalide'; end if;
+  insert into hevy_keys(profile_id, api_key) values (me.id, lower(k))
+  on conflict (profile_id) do update set api_key = excluded.api_key, synced_at = null, updated_at = now();
+end $$;
+revoke all on function set_hevy_key(uuid, text) from public;
+grant execute on function set_hevy_key(uuid, text) to anon, authenticated;
+
+create or replace function get_data(p_token uuid) returns json
+language plpgsql stable security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  return json_build_object(
+    'me', json_build_object('id', me.id, 'name', me.name, 'admin', me.is_admin, 'gcal_shared', me.gcal_shared,
+                            'hevy', exists(select 1 from hevy_keys where profile_id = me.id),
+                            'hevy_sync', (select synced_at from hevy_keys where profile_id = me.id)),
+    'profiles', coalesce((select json_agg(json_build_object('id',id,'name',name,'color',color,'admin',is_admin,'links',links) order by created_at)
+                          from profiles
+                          where me.is_admin or id = me.id or (_is_pair(me.id) and _is_pair(id))), '[]'::json),
+    'events', coalesce((select json_agg(json_build_object('id',id,'title',title,'date',date,'time',time,'owner',owner,'scope',scope,'meta',meta))
+                        from events where owner = me.id or (scope = 'commun' and _is_pair(me.id))), '[]'::json),
+    'tasks',  coalesce((select json_agg(json_build_object('id',id,'title',title,'period',period,'key',key,'progress',progress,'progress_b',progress_b,'owner',owner,'scope',scope))
+                        from tasks  where owner = me.id or (scope = 'commun' and _is_pair(me.id))), '[]'::json),
+    'gcal',   coalesce((select json_agg(json_build_object('id',g.id,'title',g.title,'date',g.date,'time',g.time,'owner',g.owner))
+                        from gcal_events g join profiles pr on pr.id = g.owner
+                        where _is_pair(me.id) and _is_pair(g.owner) and (g.owner = me.id or pr.gcal_shared)), '[]'::json),
+    'workouts', coalesce((select json_agg(json_build_object('id',w.id,'owner',w.profile_id,'title',w.title,'day',w.day,'start',w.start_time,'end',w.end_time,'sets',w.n_sets,'vol',w.volume,'ex',w.ex) order by w.start_time desc)
+                        from workouts w
+                        where w.day >= current_date - 400 and (w.profile_id = me.id or (_is_pair(me.id) and _is_pair(w.profile_id)))), '[]'::json)
+  );
+end $$;
