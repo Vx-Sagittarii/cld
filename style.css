@@ -525,3 +525,29 @@ button.chk { cursor: pointer; }
 .okbox { padding: 12px 14px; margin-bottom: 10px; border-radius: 14px; background: rgba(61,220,151,.14); border: 1.5px solid #3DDC97; line-height: 1.6; }
 .card select { width: 100%; padding: 12px 14px; border-radius: 14px; border: 1.5px solid var(--line); background: #1A0D40; font-size: 16px; }
 .wkrange { display: block; margin: -4px 0 8px; }
+
+/* Chatbot : petit bouton + petite fenêtre */
+.chat-fab { position: fixed; right: 14px; bottom: calc(82px + env(safe-area-inset-bottom)); z-index: 40; width: 46px; height: 46px; border-radius: 50%; border: 1px solid var(--line); background: rgba(40,24,86,.92); color: #fff; font-size: 21px; box-shadow: 0 6px 18px rgba(0,0,0,.35); cursor: pointer; }
+.chat-panel { position: fixed; right: 12px; bottom: calc(82px + env(safe-area-inset-bottom)); z-index: 41; width: min(92vw, 350px); max-height: min(62vh, 480px); display: flex; flex-direction: column; background: rgba(24,13,58,.97); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 10px 30px rgba(0,0,0,.5); overflow: hidden; }
+.chat-panel[hidden], .chat-fab[hidden] { display: none; }
+.chat-h { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.chat-h .x { background: none; border: 0; color: var(--text); font-size: 22px; line-height: 1; cursor: pointer; }
+.chat-log { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 120px; }
+.cm { max-width: 88%; padding: 8px 11px; border-radius: 14px; font-size: 14px; line-height: 1.4; word-wrap: break-word; }
+.cm.me { align-self: flex-end; background: var(--accent); color: #fff; }
+.cm.bot { align-self: flex-start; background: rgba(255,255,255,.08); }
+.chat-ex { display: flex; flex-direction: column; gap: 6px; }
+.chat-ex small { color: var(--muted); }
+.chat-ex button { text-align: left; background: transparent; border: 1px dashed var(--line); color: var(--muted); font-style: italic; border-radius: 12px; padding: 8px 10px; font-size: 13px; cursor: pointer; }
+.chat-in { display: flex; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--line); }
+.chat-in input { flex: 1; min-width: 0; padding: 10px; border-radius: 12px; background: rgba(255,255,255,.07); border: 1px solid var(--line); color: var(--text); font-size: 16px; }
+.chat-note { display: block; padding: 0 12px 8px; color: var(--muted); font-size: 12px; }
+body.login .chat-fab, body.login .chat-panel { display: none !important; }
+
+/* Rouage Réglages, en haut à droite */
+main { padding-top: calc(env(safe-area-inset-top) + 58px); position: relative; }
+.tab.gear { position: absolute; top: calc(env(safe-area-inset-top) + 10px); right: 16px; z-index: 30; flex: none; width: 44px; height: 44px; max-width: none; padding: 0; justify-content: center; border-radius: 50%; border: 1px solid var(--line); background: rgba(40,24,86,.85); color: var(--text); }
+.tab.gear svg { width: 24px; height: 24px; }
+.tab.gear.on { color: #fff; background: var(--accent); border-color: transparent; }
+.tab.gear[hidden] { display: none; }
+body.login .tab.gear { display: none !important; }

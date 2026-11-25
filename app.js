@@ -293,6 +293,50 @@ function viewSignup() {
     <p class="muted" style="margin-top:14px">Déjà un compte ? <a href="${location.pathname}">Se connecter</a></p>
   </div>`;
 }
+// ---- Chatbot (petit, prive, supprime chaque jour a 23h59) ----
+const CHAT_ON = false; // activé quand le fournisseur d'IA est choisi et la clé configurée
+const chat = { open: false, msgs: [], busy: false, loaded: false };
+const chatFmt = (t) => esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>");
+function chatSync() {
+  const show = CHAT_ON && cloud && !needLogin && loaded && !needPseudo;
+  let fab = $("#chatFab"), pan = $("#chatPanel");
+  if (!show) { fab?.remove(); pan?.remove(); return; }
+  if (!fab) {
+    fab = document.createElement("button"); fab.id = "chatFab"; fab.className = "chat-fab"; fab.dataset.act = "chat-open"; fab.setAttribute("aria-label", "Ouvrir l'assistant"); fab.textContent = "💬";
+    document.body.appendChild(fab);
+    pan = document.createElement("div"); pan.id = "chatPanel"; pan.className = "chat-panel"; pan.hidden = true;
+    pan.innerHTML = `<div class="chat-h"><b>Assistant</b><button class="x" data-act="chat-close" aria-label="Fermer">×</button></div>
+      <div class="chat-log" id="chatLog" aria-live="polite"></div>
+      <div class="chat-in"><input id="chatIn" maxlength="600" placeholder="Pose ta question…" autocomplete="off"><button class="btn small primary" data-act="chat-send" aria-label="Envoyer">➤</button></div>
+      <small class="chat-note">Conversation privée, supprimée chaque jour à 23h59. L'assistant n'a pas accès à internet ni à tes données.</small>`;
+    document.body.appendChild(pan);
+    $("#chatIn").addEventListener("keydown", (ev) => { if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); chatSend(); } });
+  }
+  fab.hidden = chat.open; pan.hidden = !chat.open;
+}
+function chatDraw() {
+  const lg = $("#chatLog"); if (!lg) return;
+  const ex = ["Idée d'une séance de pole dance de 30 min ?", "Comment organiser ma semaine entre sport et travail ?", "Explique-moi la surcompensation en musculation"];
+  lg.innerHTML = chat.msgs.length ? chat.msgs.map((m) => `<div class="cm ${m.role === "user" ? "me" : "bot"}">${chatFmt(m.content)}</div>`).join("") + (chat.busy ? `<div class="cm bot dots">…</div>` : "")
+    : `<div class="chat-ex"><small>Pose une question, par exemple :</small>${ex.map((e) => `<button type="button" data-act="chat-ex" data-t="${esc(e)}">${esc(e)}</button>`).join("")}</div>`;
+  lg.scrollTop = lg.scrollHeight;
+}
+async function chatOpen() {
+  chat.open = true; chatSync(); chatDraw();
+  if (!chat.loaded) { try { chat.msgs = (await rpc("chat_history", { p_token: token })) || []; chat.loaded = true; } catch (e) {} chatDraw(); }
+  setTimeout(() => $("#chatIn")?.focus(), 50);
+}
+async function chatSend() {
+  const inp = $("#chatIn"), t = (inp?.value || "").trim();
+  if (!t || chat.busy) return;
+  chat.msgs.push({ role: "user", content: t }); chat.busy = true; inp.value = ""; chatDraw();
+  try {
+    const r = await fetch(`${CFG.url}/functions/v1/hevy-sync`, { method: "POST", headers: { "Content-Type": "application/json", apikey: CFG.key }, body: JSON.stringify({ token, chat: t }) });
+    const d = await r.json().catch(() => ({}));
+    chat.msgs.push({ role: "model", content: d.reply || d.error || "Le chatbot est indisponible pour le moment." });
+  } catch (e) { chat.msgs.push({ role: "model", content: "Connexion impossible, vérifie ta connexion internet." }); }
+  chat.busy = false; chatDraw();
+}
 function viewAdminLock() {
   return `<div class="head"><div><h1>Administration</h1><div class="sub">Accès protégé</div></div><button class="btn small" data-act="admin-close">← Réglages</button></div>
     <div class="card"><h3>🔒 Mot de passe admin</h3>
@@ -331,6 +375,7 @@ function viewLogin() {
 }
 
 function render(animate = false) {
+  chatSync();
   document.body.classList.toggle("login", needLogin || (loaded && needPseudo));
   if (needLogin) { view.innerHTML = viewLogin(); hero.classList.add("off"); return; }
   if (loaded && needPseudo) { if (!$("#psName")) view.innerHTML = viewPseudo(); hero.classList.add("off"); return; } // pseudo obligatoire avant tout le reste
@@ -1569,6 +1614,10 @@ document.addEventListener("click", (ev) => {
       break;
     }
     case "pin-key": pinKey(el.dataset.k); break;
+    case "chat-open": chatOpen(); break;
+    case "chat-close": chat.open = false; chatSync(); break;
+    case "chat-send": chatSend(); break;
+    case "chat-ex": { const i = $("#chatIn"); if (i) { i.value = el.dataset.t; i.focus(); } break; }
     case "pc-start": ui.pc = {}; render(); break;
     case "pc-cancel": ui.pc = null; render(); break;
     case "pc-save": {

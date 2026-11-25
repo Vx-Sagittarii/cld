@@ -1515,3 +1515,7 @@ alter table admin_secret enable row level security;
 -- insert into admin_secret(id, hash) values (1, crypt('<mot de passe>', gen_salt('bf'))) on conflict (id) do update set hash = excluded.hash;
 -- _adm(me), admin_unlock(token, pass), admin_status(token), admin_lock(token) ; toutes les fonctions admin exigent maintenant _adm(me) au lieu de me.is_admin.
 -- admin_unlock : réservé à nelson, 5 erreurs = blocage 15 min (login_throttle, clé 'adm-nelson').
+
+-- 21. Chatbot (dormant tant que CHAT_ON=false dans app.js et que la fonction n'est pas redéployée) :
+-- tables chat_messages / chat_usage, chat_begin (20 messages/jour/personne, 120/jour au total, alerte admin quand la limite est atteinte),
+-- chat_end, chat_history, chat_purge (cron à 23h59 Paris : chat-purge-a / chat-purge-b). Voir aussi get_admin (alerte "Chatbot : limite…").

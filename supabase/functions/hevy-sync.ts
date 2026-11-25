@@ -146,7 +146,7 @@ async function watchSync(db: any, profileId: string, provider: string, code: str
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   try {
-    const { token, full, cron, provider, code } = await req.json();
+    const { token, full, cron, provider, code, chat } = await req.json();
     const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
     // Mode planifie (pg_cron, 20 h et 21 h UTC) : n'agit que s'il est 22 h a Paris, pour toutes les cles Hevy
@@ -167,6 +167,32 @@ Deno.serve(async (req) => {
     const { data: me, error: e1 } = await db.from("profiles").select("id").eq("token", token).maybeSingle();
     if (e1) return J({ error: "lecture profil impossible", detail: String(e1.message || e1) }, 500);
     if (!me) return J({ error: "jeton invalide" }, 401);
+    // Chatbot : IA gratuite (Gemini), limitee par personne cote base (chat_begin), historique prive purge chaque jour a 23h59
+    if (typeof chat === "string") {
+      const gk = Deno.env.get("GEMINI_API_KEY");
+      if (!gk) return J({ error: "Le chatbot n'est pas encore active." }, 503);
+      const { data: b, error: eb } = await db.rpc("chat_begin", { p_token: token, p_msg: chat });
+      if (eb) return J({ error: "Chatbot indisponible." }, 500);
+      if (b?.error) return J({ error: b.error }, 400);
+      if (b?.limited) return J({ limited: true, reply: "Tu as atteint la limite de messages pour aujourd'hui. Reviens demain 😊" });
+      const SYS = "Tu es l'assistant de l'appli iwi2me (agenda, taches, sport). Reponds toujours en francais, de facon claire et concise (120 mots maximum sauf si on te demande plus). Tu donnes des conseils et des analyses (sport, organisation, idees). Tu n'as PAS acces a internet ni aux donnees de la personne : ne pretends jamais le contraire et n'invente aucun fait, dis simplement quand tu ne sais pas. Pour la sante, reste prudent et conseille un professionnel si besoin.";
+      const model = Deno.env.get("CHAT_MODEL") || "gemini-3.5-flash-lite";
+      const contents = (b.history || []).map((m: any) => ({ role: m.role === "model" ? "model" : "user", parts: [{ text: String(m.content).slice(0, 4000) }] }));
+      let g: Response;
+      try {
+        g = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent", {
+          method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": gk },
+          body: JSON.stringify({ systemInstruction: { parts: [{ text: SYS }] }, contents, generationConfig: { maxOutputTokens: 500, temperature: 0.7 } }),
+        });
+      } catch (_e) { return J({ error: "Le chatbot ne repond pas, reessaie dans un moment." }, 502); }
+      if (g.status === 429) return J({ error: "Le chatbot est tres sollicite, reessaie dans un moment." }, 429);
+      if (!g.ok) return J({ error: "Le chatbot est indisponible pour le moment.", status: g.status }, 502);
+      const gd = await g.json();
+      const reply = String((gd?.candidates?.[0]?.content?.parts || []).map((x: any) => x.text || "").join("")).trim();
+      if (!reply) return J({ error: "Pas de reponse, reformule ta question." }, 502);
+      await db.rpc("chat_end", { p_token: token, p_reply: reply });
+      return J({ reply });
+    }
     if (provider === "strava" || provider === "garmin") {
       const r: any = await watchSync(db, me.id, provider, typeof code === "string" ? code : null, !!full);
       return J(r, r.status || 200);
