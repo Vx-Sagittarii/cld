@@ -755,3 +755,150 @@ begin
 end $$;
 revoke all on function set_watch_key(uuid,text,text,text,text), delete_watch(uuid,text) from public;
 grant execute on function set_watch_key(uuid,text,text,text,text), delete_watch(uuid,text) to anon, authenticated;
+-- ============ Migration 14 : objectifs sport génériques (salle, course, pole, activités perso) + invitations + droits ============
+alter table profiles add column if not exists perms jsonb not null default '{}'::jsonb;   -- clé à false = fonction désactivée (tasks, sport, astro, integrations)
+alter table sport_goals add column if not exists targets jsonb;                            -- ex. {"gym":5,"run":2,"pole":1,"c_ab12":3}
+alter table sport_logs drop constraint if exists sport_logs_kind_check;                    -- jours saisis à la main : pole, run, ou activité perso c_xxxx
+create table if not exists sport_custom (
+  profile_id text not null references profiles(id) on delete cascade,
+  id text not null check (id ~ '^c_[a-z0-9]{3,12}$'),
+  name text not null check (char_length(name) between 1 and 24),
+  primary key (profile_id, id)
+);
+alter table sport_custom enable row level security;
+create table if not exists invites (
+  code uuid primary key default gen_random_uuid(),
+  label text, perms jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null default now() + interval '7 days',
+  used_by text
+);
+alter table invites enable row level security;
+
+create or replace function set_sport_targets(p_token uuid, p_targets jsonb) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token); mon date := date_trunc('week', now() at time zone 'Europe/Paris')::date; k text; clean jsonb := '{}'::jsonb; n int;
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  for k in select jsonb_object_keys(coalesce(p_targets, '{}'::jsonb)) loop
+    if k !~ '^(gym|pole|run|c_[a-z0-9]{3,12})$' then continue; end if;
+    n := greatest(0, least(7, coalesce((p_targets ->> k)::int, 0)));
+    clean := clean || jsonb_build_object(k, n);
+  end loop;
+  insert into sport_goals(profile_id, from_week, gym, pole, targets)
+  values (me.id, mon, coalesce((clean ->> 'gym')::int, 0), coalesce((clean ->> 'pole')::int, 0), clean)
+  on conflict (profile_id, from_week) do update set gym = excluded.gym, pole = excluded.pole, targets = excluded.targets;
+end $$;
+
+create or replace function set_sport_log(p_token uuid, p_day date, p_kind text, p_on boolean) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  if p_kind !~ '^(pole|run|c_[a-z0-9]{3,12})$' or p_day < current_date - 400 or p_day > current_date + 1 then raise exception 'invalide'; end if;
+  if coalesce(p_on, false) then
+    insert into sport_logs(profile_id, day, kind) values (me.id, p_day, p_kind) on conflict do nothing;
+  else
+    delete from sport_logs where profile_id = me.id and day = p_day and kind = p_kind;
+  end if;
+end $$;
+
+create or replace function set_sport_custom(p_token uuid, p_id text, p_name text) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  insert into sport_custom(profile_id, id, name) values (me.id, p_id, left(trim(p_name), 24))
+  on conflict (profile_id, id) do update set name = excluded.name;
+end $$;
+
+create or replace function delete_sport_custom(p_token uuid, p_id text) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  delete from sport_custom where profile_id = me.id and id = p_id;
+  delete from sport_logs where profile_id = me.id and kind = p_id;
+end $$;
+
+create or replace function get_sport(p_token uuid) returns json
+language plpgsql stable security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  return json_build_object(
+    'perms', me.perms,
+    'goals', coalesce((select json_agg(json_build_object('owner', g.profile_id, 'from', g.from_week, 'gym', g.gym, 'pole', g.pole,
+                         'targets', coalesce(g.targets, jsonb_build_object('gym', g.gym, 'pole', g.pole))))
+                       from sport_goals g where g.profile_id = me.id or (_is_pair(me.id) and _is_pair(g.profile_id))), '[]'::json),
+    'logs',  coalesce((select json_agg(json_build_object('owner', l.profile_id, 'day', l.day, 'kind', l.kind))
+                       from sport_logs l where l.day >= current_date - 400 and (l.profile_id = me.id or (_is_pair(me.id) and _is_pair(l.profile_id)))), '[]'::json),
+    'custom', coalesce((select json_agg(json_build_object('owner', c.profile_id, 'id', c.id, 'name', c.name))
+                       from sport_custom c where c.profile_id = me.id or (_is_pair(me.id) and _is_pair(c.profile_id))), '[]'::json),
+    'watch', coalesce((select json_agg(json_build_object('provider', k.provider, 'synced_at', k.synced_at, 'linked', (k.refresh_token is not null or k.api_key is not null), 'client_id', k.client_id))
+                       from watch_keys k where k.profile_id = me.id), '[]'::json),
+    'acts',  coalesce((select json_agg(json_build_object('owner', a.profile_id, 'id', a.id, 'provider', a.provider, 'day', a.day, 'title', a.title, 'kind', a.kind,
+                         'start', a.start_time, 'secs', a.secs, 'dist', a.dist_m, 'kcal', a.kcal, 'hr', a.avg_hr) order by a.start_time desc)
+                       from activities a where a.day >= current_date - 400 and (a.profile_id = me.id or (_is_pair(me.id) and _is_pair(a.profile_id)))), '[]'::json));
+end $$;
+
+-- ---------- Administration : invitations et droits ----------
+create or replace function create_invite(p_token uuid, p_label text, p_perms jsonb) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token); c uuid;
+begin
+  if me.id is null or not me.is_admin then raise exception 'réservé à l''admin'; end if;
+  insert into invites(label, perms) values (left(trim(coalesce(p_label, '')), 40), coalesce(p_perms, '{}'::jsonb)) returning code into c;
+  return c;
+end $$;
+
+create or replace function revoke_invite(p_token uuid, p_code uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null or not me.is_admin then raise exception 'réservé à l''admin'; end if;
+  delete from invites where code = p_code and used_by is null;
+end $$;
+
+create or replace function set_perms(p_token uuid, p_id text, p_perms jsonb) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null or not me.is_admin or _is_pair(p_id) then raise exception 'interdit'; end if;
+  update profiles set perms = coalesce(p_perms, '{}'::jsonb) where id = p_id;
+end $$;
+
+create or replace function get_admin(p_token uuid) returns json
+language plpgsql stable security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null or not me.is_admin then raise exception 'réservé à l''admin'; end if;
+  return json_build_object(
+    'users', coalesce((select json_agg(json_build_object('id', id, 'name', name, 'color', color, 'perms', perms, 'created', created_at) order by created_at)
+                       from profiles where not _is_pair(id)), '[]'::json),
+    'invites', coalesce((select json_agg(json_build_object('code', code, 'label', label, 'perms', perms, 'expires', expires_at, 'used_by', used_by) order by created_at desc)
+                         from invites where used_by is null and expires_at > now()), '[]'::json));
+end $$;
+
+-- Création d'un compte depuis un lien d'invitation (appelée sans être connecté)
+create or replace function claim_invite(p_code uuid, p_name text, p_email text, p_pin text) returns json
+language plpgsql security definer set search_path = public, extensions as $$
+declare inv invites; np profiles; nm text := left(trim(coalesce(p_name, '')), 24); em text := lower(trim(coalesce(p_email, ''))); pid text; pal text[] := array['#4DB8FF','#FF7AC8','#FFD54D','#B28CFF','#5EEAD4','#FF9F6B']; n int;
+begin
+  select * into inv from invites where code = p_code and used_by is null and expires_at > now() for update;
+  if inv.code is null then return json_build_object('error', 'Ce lien d''invitation n''est plus valide.'); end if;
+  if char_length(nm) < 2 then return json_build_object('error', 'Saisis ton prénom.'); end if;
+  if em !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then return json_build_object('error', 'E-mail invalide.'); end if;
+  if coalesce(p_pin, '') !~ '^[0-9]{6,12}$' then return json_build_object('error', 'Le code doit faire 6 à 12 chiffres.'); end if;
+  if exists (select 1 from profiles where lower(email) = em) then return json_build_object('error', 'Cet e-mail a déjà un compte : connecte-toi.'); end if;
+  pid := coalesce(nullif(regexp_replace(lower(nm), '[^a-z0-9]', '', 'g'), ''), 'user') || '-' || substr(md5(random()::text), 1, 5);
+  select count(*) into n from profiles;
+  insert into profiles(id, name, color, email, pin_hash, perms) values (pid, nm, pal[1 + n % 6], em, crypt(p_pin, gen_salt('bf')), inv.perms) returning * into np;
+  update invites set used_by = np.id where code = inv.code;
+  return json_build_object('token', np.token, 'id', np.id);
+end $$;
+
+revoke all on function set_sport_targets(uuid,jsonb), set_sport_custom(uuid,text,text), delete_sport_custom(uuid,text), create_invite(uuid,text,jsonb), revoke_invite(uuid,uuid),
+  set_perms(uuid,text,jsonb), get_admin(uuid), claim_invite(uuid,text,text,text) from public;
+grant execute on function set_sport_targets(uuid,jsonb), set_sport_custom(uuid,text,text), delete_sport_custom(uuid,text), create_invite(uuid,text,jsonb), revoke_invite(uuid,uuid),
+  set_perms(uuid,text,jsonb), get_admin(uuid), claim_invite(uuid,text,text,text) to anon, authenticated;

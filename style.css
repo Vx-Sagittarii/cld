@@ -464,3 +464,14 @@ svg.body text { fill: currentColor; opacity: .55; font-size: 11px; }
 .wprov { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.08); }
 .wprov small { display: block; margin: 4px 0; opacity: .75; line-height: 1.45; } .wprov small a { color: var(--accent); }
 .wprov .ok { color: #3DDC97; font-size: 12px; font-weight: 600; margin-left: 6px; }
+
+/* Page admin / droits */
+body.solo .hero { display: none; }
+.prow { display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 11px 14px; margin: 6px 0; border-radius: 14px; border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.05); color: inherit; font-size: 14px; text-align: left; }
+.prow .pk { position: relative; flex: none; width: 42px; height: 24px; border-radius: 12px; background: rgba(255,255,255,.16); transition: background .2s; }
+.prow .pk::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .2s; }
+.prow.on .pk { background: #3DDC97; } .prow.on .pk::after { transform: translateX(18px); }
+.inv { display: flex; flex-direction: column; gap: 6px; padding: 10px 0; border-top: 1px solid rgba(255,255,255,.08); } .inv small { display: block; opacity: .65; }
+.usr { padding: 12px 0; border-top: 1px solid rgba(255,255,255,.08); } .usr-h { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; } .usr-h b { flex: 1; }
+.subh { margin: 16px 0 4px; font-size: 13px; opacity: .8; }
+.del-mini { margin-left: 6px; width: 22px; height: 22px; border-radius: 50%; background: rgba(255,90,110,.18); color: #FF9AA6; font-size: 14px; line-height: 1; }

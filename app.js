@@ -250,7 +250,22 @@ function pinKey(k) {
   else if (/^\d$/.test(k) && pinCode.length < 12) pinCode += k;
   const d = document.querySelector("#lgDots"); if (d) d.innerHTML = pinDots();
 }
+const INVITE = (() => { try { const c = new URLSearchParams(location.search).get("invite"); return /^[0-9a-f-]{36}$/i.test(c || "") ? c : null; } catch (e) { return null; } })();
+function viewSignup() {
+  return `<div class="login-box">
+    <h1>iwi2me</h1>
+    <p class="muted">Tu es invité(e) : crée ton compte en 20 secondes.</p>
+    <div class="field"><label>Prénom</label><input id="suName" maxlength="24" autocomplete="given-name"></div>
+    <div class="field"><label>E-mail</label><input id="suMail" type="email" autocomplete="email" inputmode="email" autocapitalize="off"></div>
+    <div class="field"><label>Code secret (6 à 12 chiffres)</label><input class="numonly" id="suPin" type="password" inputmode="numeric" maxlength="12" autocomplete="new-password"></div>
+    <div class="field"><label>Confirme ton code</label><input class="numonly" id="suPin2" type="password" inputmode="numeric" maxlength="12" autocomplete="new-password"></div>
+    <p class="lg-err" id="lgErr"></p>
+    <button class="btn" data-act="signup">Créer mon compte</button>
+    <p class="muted" style="margin-top:14px">Déjà un compte ? <a href="${location.pathname}">Se connecter</a></p>
+  </div>`;
+}
 function viewLogin() {
+  if (INVITE) return viewSignup();
   return `<div class="login-box">
     <h1>iwi2me</h1>
     <p class="muted">Connecte-toi pour retrouver ton espace.</p>
@@ -270,7 +285,9 @@ function viewLogin() {
 function render(animate = false) {
   document.body.classList.toggle("login", needLogin);
   if (needLogin) { view.innerHTML = viewLogin(); hero.classList.add("off"); return; }
-  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("on", t.dataset.tab === ui.tab));
+  if (permOff(ui.tab)) ui.tab = "cal";
+  document.querySelectorAll(".tab").forEach((t) => { t.classList.toggle("on", t.dataset.tab === ui.tab); t.hidden = permOff(t.dataset.tab); });
+  document.body.classList.toggle("solo", cloud && !isPair(me));
   renderHero();
   applySeason();
   if (!loaded) { view.innerHTML = `<div class="empty">Chargement…</div>`; return; }
@@ -278,11 +295,11 @@ function render(animate = false) {
   else if (ui.tab === "tasks") view.innerHTML = viewTasks();
   else if (ui.tab === "sport") view.innerHTML = viewSport();
   else if (ui.tab === "astro") view.innerHTML = viewAstro();
-  else view.innerHTML = viewSettings();
+  else view.innerHTML = ui.admin && isAdmin ? viewAdmin() : viewSettings();
   document.body.classList.toggle("viewing", viewing() && (ui.tab === "cal" || ui.tab === "tasks"));
   view.classList.toggle("enter", animate);
   if (gcal.on && gcal.token && ui.tab === "cal") ensureGcal();        // cascade d'apparition seulement au changement d'onglet
-  hero.classList.toggle("off", ui.tab !== "cal"); // le bandeau photo n'apparaît que sur le calendrier
+  hero.classList.toggle("off", ui.tab !== "cal" || (cloud && !isPair(me))); // le bandeau photo n'apparaît que sur le calendrier
 }
 
 
@@ -577,19 +594,42 @@ async function syncHevy(manual, full) {
 }
 
 // ----- Objectif sport : jours de salle (Hevy) et de pole dance (saisis à la main) par semaine -----
+const permOff = (k) => cloud && !isPair(me) && !isAdmin && (state.perms || {})[k] === false;
 const weekMon = (iso) => toISO(mondayOf(fromISO(iso)));
 const goalFor = (who, mon) => (state.goals || []).filter((g) => g.owner === who && String(g.from).slice(0, 10) <= mon).sort((a, b) => (a.from < b.from ? 1 : -1))[0] || null;
-function weekStats(who, mon) {
-  const end = toISO(addDays(fromISO(mon), 6));
-  const gym = new Set((state.workouts || []).filter((w) => w.owner === who && wIso(w.day) >= mon && wIso(w.day) <= end).map((w) => wIso(w.day))).size;
-  const pole = new Set((state.logs || []).filter((l) => l.owner === who && l.kind === "pole" && String(l.day).slice(0, 10) >= mon && String(l.day).slice(0, 10) <= end).map((l) => String(l.day).slice(0, 10))).size;
-  const g = goalFor(who, mon), has = !!g && g.gym + g.pole > 0;
-  return { gym, pole, g, has, ok: has ? gym >= g.gym && pole >= g.pole : null };
+// Types d'activités suivies : salle (Hevy, automatique), course (montre ou saisie), pole dance (saisie) + activités perso nommées
+const RUN_RE = /run/;
+const customOf = (who) => (state.custom || []).filter((c) => c.owner === who);
+const kindsOf = (who) => [["gym", "🏋️ Salle"], ["run", "🏃 Course"], ["pole", "🩰 Pole dance"], ...customOf(who).map((c) => [c.id, "✨ " + c.name])];
+const manualKinds = (who) => kindsOf(who).filter(([k]) => k !== "gym");
+const lday = (l) => String(l.day).slice(0, 10);
+const hasLog = (who, iso, kind) => (state.logs || []).some((l) => l.owner === who && l.kind === kind && lday(l) === iso);
+const anyLog = (who, iso) => (state.logs || []).some((l) => l.owner === who && l.kind !== "run" && lday(l) === iso) || hasLog(who, iso, "run");
+const targetsOf = (g) => g ? (g.targets || { gym: g.gym || 0, pole: g.pole || 0 }) : {};
+function daysOf(who, kind, from, to) {
+  const inR = (d) => d >= from && d <= to, set = new Set();
+  if (kind === "gym") (state.workouts || []).filter((w) => w.owner === who && inR(wIso(w.day))).forEach((w) => set.add(wIso(w.day)));
+  if (kind === "run") (state.acts || []).filter((a) => a.owner === who && RUN_RE.test(a.kind || "") && inR(lday(a))).forEach((a) => set.add(lday(a)));
+  (state.logs || []).filter((l) => l.owner === who && l.kind === kind && inR(lday(l))).forEach((l) => set.add(lday(l)));
+  return set;
 }
-const hasPole = (who, iso) => (state.logs || []).some((l) => l.owner === who && l.kind === "pole" && String(l.day).slice(0, 10) === iso);
+function weekStats(who, mon) {
+  const end = toISO(addDays(fromISO(mon), 6)), g = goalFor(who, mon), t = targetsOf(g);
+  const items = kindsOf(who).map(([k, label]) => ({ k, label, goal: t[k] || 0, done: daysOf(who, k, mon, end).size })).filter((x) => x.goal > 0);
+  const has = items.length > 0;
+  return { items, g, has, ok: has ? items.every((i) => i.done >= i.goal) : null };
+}
+const hasPole = (who, iso) => hasLog(who, iso, "pole");
+const sumTxt = (r) => r.items.map((i) => `${i.label.replace(/^\S+\s/, "")} ${i.done}/${i.goal}`).join(", ");
 function goalBar(label, done, goal, color) {
   const pct = goal ? Math.min(100, Math.round((done / goal) * 100)) : 0, ok = goal && done >= goal;
   return `<div class="grow"><span>${label}</span><div class="mbar"><i style="width:${pct}%;--c:${ok ? "#3DDC97" : color}"></i></div><em class="${ok ? "ok" : ""}">${done} / ${goal}${ok ? " ✓" : ""}</em></div>`;
+}
+// Boutons « ce jour-là j'ai fait… » (course, pole dance, activités perso) ; chez l'autre : simple affichage
+function manualBtns(who, iso) {
+  const ks = manualKinds(who);
+  if (who === me && !viewing()) return ks.map(([k, label]) => `<button class="btn small ${hasLog(me, iso, k) ? "primary" : ""}" data-act="log-toggle" data-kind="${k}" data-day="${iso}">${esc(label)} ${hasLog(me, iso, k) ? "✓" : "＋"}</button>`).join("");
+  return ks.filter(([k]) => hasLog(who, iso, k)).map(([, label]) => `<div class="empty">${esc(label)} ce jour</div>`).join("");
 }
 // Carte « objectif de la semaine » : avancement + résultat des semaines passées
 function sportGoalCard(who) {
@@ -599,31 +639,31 @@ function sportGoalCard(who) {
   if (!st.has) body = `<div class="empty">${own ? "Pas encore d'objectif sport." : "Aucun objectif défini."}</div>`;
   else {
     const left = 7 - ((new Date().getDay() + 6) % 7) - 1;
-    body = (st.g.gym ? goalBar("🏋️ Salle", st.gym, st.g.gym, col) : "") + (st.g.pole ? goalBar("🩰 Pole dance", st.pole, st.g.pole, col) : "")
+    body = st.items.map((i) => goalBar(i.label, i.done, i.goal, col)).join("")
       + `<small class="muted">${st.ok ? "Objectif de la semaine atteint 🎉" : left > 0 ? `Encore ${left} jour${left > 1 ? "s" : ""} pour y arriver` : "Dernier jour de la semaine"}</small>`;
   }
-  // semaines terminées (les 6 dernières)
   const hist = [];
   for (let i = 1; i <= 6; i++) { const m = toISO(addDays(fromISO(mon), -7 * i)), r = weekStats(who, m); if (r.has) hist.push({ m, r }); }
   const last = hist.find((h) => h.m === toISO(addDays(fromISO(mon), -7)));
-  const lastTxt = last ? `<div class="lastweek ${last.r.ok ? "ok" : "ko"}">Semaine dernière : ${last.r.ok ? "objectif réussi ✓" : "objectif manqué"} <small>(salle ${last.r.gym}/${last.r.g.gym}${last.r.g.pole ? `, pole ${last.r.pole}/${last.r.g.pole}` : ""})</small></div>` : "";
-  const chips = hist.length ? `<div class="hist">${hist.reverse().map((h) => `<span class="hc ${h.r.ok ? "ok" : "ko"}" title="Semaine du ${dm(h.m)} : salle ${h.r.gym}/${h.r.g.gym}${h.r.g.pole ? ", pole " + h.r.pole + "/" + h.r.g.pole : ""}"><b>${h.r.ok ? "✓" : "✗"}</b><i>${dm(h.m)}</i></span>`).join("")}</div>` : "";
+  const lastTxt = last ? `<div class="lastweek ${last.r.ok ? "ok" : "ko"}">Semaine dernière : ${last.r.ok ? "objectif réussi ✓" : "objectif manqué"} <small>(${esc(sumTxt(last.r))})</small></div>` : "";
+  const chips = hist.length ? `<div class="hist">${hist.reverse().map((h) => `<span class="hc ${h.r.ok ? "ok" : "ko"}" title="Semaine du ${dm(h.m)} : ${esc(sumTxt(h.r))}"><b>${h.r.ok ? "✓" : "✗"}</b><i>${dm(h.m)}</i></span>`).join("")}</div>` : "";
   return `<div class="card goalcard"><h3>🎯 Objectif sport · ${esc(p?.name || "")}</h3>${body}${lastTxt}${chips}
     ${own ? `<div class="btn-line"><button class="btn small" data-act="goto-goal">${st.has ? "Modifier mon objectif" : "Définir mon objectif"}</button></div>` : ""}</div>`;
 }
-// Éditeur de l'objectif (onglet Tâches) : chiffres « x / 7 jours »
+// Éditeur de l'objectif (onglet Tâches) : « x / 7 jours » pour chaque activité, + activités perso
 function sportGoalEditor() {
-  if (!cloud) return "";
-  const who = viewing() ? ui.viewAs : me, mon = weekMon(toISO(new Date())), cur = goalFor(who, mon) || { gym: 0, pole: 0 };
+  if (!cloud || permOff("sport")) return "";
+  const who = viewing() ? ui.viewAs : me, mon = weekMon(toISO(new Date()));
   if (viewing()) return sportGoalCard(who);
-  const d = ui.goalDraft || { gym: cur.gym, pole: cur.pole };
-  const chips = (k) => Array.from({ length: 8 }, (_, v) => `<button type="button" class="nchip ${d[k] === v ? "on" : ""}" data-act="goal-set" data-k="${k}" data-v="${v}">${v}</button>`).join("");
-  const dirty = ui.goalDraft && (d.gym !== cur.gym || d.pole !== cur.pole);
+  const cur = targetsOf(goalFor(who, mon)), d = ui.goalDraft || cur, ks = kindsOf(me);
+  const chips = (k) => Array.from({ length: 8 }, (_, v) => `<button type="button" class="nchip ${(d[k] || 0) === v ? "on" : ""}" data-act="goal-set" data-k="${k}" data-v="${v}">${v}</button>`).join("");
+  const dirty = !!ui.goalDraft && ks.some(([k]) => (d[k] || 0) !== (cur[k] || 0));
   return `<div class="card" id="sport-goal"><h3>🎯 Objectif sport (par semaine)</h3>
-    <p class="muted">Combien de jours par semaine veux-tu faire du sport ? La salle se compte toute seule avec Hevy ; le pole dance, tu le coches dans Sport.</p>
-    <div class="goal-ed"><b>🏋️ Salle</b><span>${d.gym} / 7 jours</span></div><div class="nchips">${chips("gym")}</div>
-    <div class="goal-ed"><b>🩰 Pole dance</b><span>${d.pole} / 7 jours</span></div><div class="nchips">${chips("pole")}</div>
-    <div class="btn-line"><button class="btn small ${dirty ? "primary" : ""}" data-act="goal-save" ${dirty ? "" : "disabled"}>Enregistrer l'objectif</button></div></div>${sportGoalCard(me)}`;
+    <p class="muted">Combien de jours par semaine pour chaque activité ? La salle se compte toute seule avec Hevy, la course avec ta montre (Strava / Garmin). Tu peux aussi cocher des jours à la main dans l'onglet Sport.</p>
+    ${ks.map(([k, label]) => `<div class="goal-ed"><b>${esc(label)}${k.startsWith("c_") ? ` <button type="button" class="del-mini" data-act="custom-del" data-id="${k}" aria-label="Supprimer cette activité">×</button>` : ""}</b><span>${d[k] || 0} / 7 jours</span></div><div class="nchips">${chips(k)}</div>`).join("")}
+    <div class="btn-line"><button class="btn small ${dirty ? "primary" : ""}" data-act="goal-save" ${dirty ? "" : "disabled"}>Enregistrer l'objectif</button></div>
+    <div class="goal-ed" style="margin-top:16px"><b>Ajouter une activité à toi</b></div>
+    <div class="btn-line"><input id="cuName" maxlength="24" placeholder="ex. Natation, Yoga, Escalade…" style="flex:1"><button class="btn small" data-act="custom-add">Ajouter</button></div></div>${sportGoalCard(me)}`;
 }
 function sportCard() {
   const pair = state.profiles.filter((p) => isPair(p.id));
@@ -640,13 +680,13 @@ function sportCard() {
     if (okUrl(l.strava)) btns.push(`<a class="btn small" href="${esc(l.strava)}" target="_blank" rel="noopener">🏃 Strava · ${esc(p.name)}</a>`);
   });
   const who = viewing() ? ui.viewAs : me, own = who === me && !viewing();
-  const poleBtn = own ? `<button class="btn small ${hasPole(me, ui.selected) ? "primary" : ""}" data-act="pole-toggle" data-day="${ui.selected}">🩰 Pole dance ce jour ${hasPole(me, ui.selected) ? "✓" : "＋"}</button>` : (hasPole(who, ui.selected) ? `<div class="empty">🩰 Pole dance ce jour</div>` : "");
+  const poleBtn = manualBtns(who, ui.selected);
   const ago = hevySyncAt ? ` · mis à jour ${new Date(hevySyncAt).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : "";
   const refresh = hevyOn && own ? `<button class="btn small" data-act="hevy-refresh">↻ Actualiser mes séances</button>` : "";
   return `<div class="card"><h3>Sport</h3>${wHtml}
     ${(poleBtn || refresh) ? `<div class="btn-line" style="flex-wrap:wrap;margin-top:8px">${poleBtn}${refresh}</div>` : ""}
     ${refresh && ago ? `<small class="muted">${ago.slice(3)}</small>` : ""}
-    ${btns.length ? `<div class="btn-line" style="flex-wrap:wrap;margin-top:8px">${btns.join("")}</div>` : ""}</div>${cloud && isPair(me) ? sportGoalCard(who) : ""}`;
+    ${btns.length ? `<div class="btn-line" style="flex-wrap:wrap;margin-top:8px">${btns.join("")}</div>` : ""}</div>${cloud && !permOff("sport") ? sportGoalCard(who) : ""}`;
 }
 
 // ----- Onglet Sport : séances Hevy du mois (par personne) -----
@@ -721,13 +761,14 @@ function viewSport() {
     const d = addDays(first, i), iso = toISO(d);
     if (i >= 35 && d.getMonth() !== mo) break;
     const n = days.get(iso) || 0, inMonth = d.getMonth() === mo;
-    cells += `<button class="day sp ${!inMonth ? "out" : ""} ${n ? "went" : ""} ${hasPole(who, iso) ? "pole" : ""} ${actDays.has(iso) ? "act" : ""} ${iso === toISO(today) ? "today" : ""} ${iso === ui.selected ? "sel" : ""}" style="--c:${p?.color || "#A45CFF"}" data-act="pick" data-date="${iso}">${d.getDate()}${n > 1 ? `<span class="cnt">${n}</span>` : ""}</button>`;
+    cells += `<button class="day sp ${!inMonth ? "out" : ""} ${n ? "went" : ""} ${anyLog(who, iso) ? "pole" : ""} ${actDays.has(iso) ? "act" : ""} ${iso === toISO(today) ? "today" : ""} ${iso === ui.selected ? "sel" : ""}" style="--c:${p?.color || "#A45CFF"}" data-act="pick" data-date="${iso}">${d.getDate()}${n > 1 ? `<span class="cnt">${n}</span>` : ""}</button>`;
   }
   const dayWs = all.filter((w) => wIso(w.day) === ui.selected);
   const dayActs = myActs.filter((a) => String(a.day).slice(0, 10) === ui.selected);
   const watchLinked = (state.watch || []).some((w) => w.linked);
-  const poleN = (state.logs || []).filter((l) => l.owner === who && l.kind === "pole" && String(l.day).slice(0, 7) === y + "-" + pad(mo + 1)).length;
-  const poleOwn = who === me && !viewing() ? `<button class="btn small ${hasPole(me, ui.selected) ? "primary" : ""}" data-act="pole-toggle" data-day="${ui.selected}" style="margin-top:8px">🩰 Pole dance ce jour ${hasPole(me, ui.selected) ? "✓" : "＋"}</button>` : (hasPole(who, ui.selected) ? `<div class="empty">🩰 Pole dance ce jour</div>` : "");
+  const manualM = (state.logs || []).filter((l) => l.owner === who && String(l.day).slice(0, 7) === y + "-" + pad(mo + 1));
+  const manualTxt = manualKinds(who).map(([k, label]) => { const n = new Set(manualM.filter((l) => l.kind === k).map(lday)).size; return n ? `${label} <b>${n}</b>` : ""; }).filter(Boolean).join(" · ");
+  const poleOwn = manualBtns(who, ui.selected);
   const noKey = who === me && !hevyOn;
   return `
     <div class="head">
@@ -745,10 +786,10 @@ function viewSport() {
       <div><b>${mins >= 60 ? Math.floor(mins / 60) + " h " + String(mins % 60).padStart(2, "0") : mins + " min"}</b><span>d'effort</span></div>
       <div><b>${vol ? fmtVol(vol) : "–"}</b><span>soulevé</span></div>
     </div>
-    ${poleN ? `<div class="polecount">🩰 Pole dance : <b>${poleN}</b> jour${poleN > 1 ? "s" : ""} ce mois-ci</div>` : ""}
-    ${cloud && isPair(me) ? sportGoalCard(who) : ""}
+    ${manualTxt ? `<div class="polecount">${manualTxt} <small>jours ce mois-ci (saisis à la main)</small></div>` : ""}
+    ${cloud && !permOff("sport") ? sportGoalCard(who) : ""}
     <div class="card">
-      <h3>Jours d'entraînement <small class="legend"><i class="lg gym"></i>salle <i class="lg pole"></i>pole <i class="lg act"></i>montre</small></h3>
+      <h3>Jours d'entraînement <small class="legend"><i class="lg gym"></i>salle <i class="lg pole"></i>saisi <i class="lg act"></i>montre</small></h3>
       <div class="dow"><span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span></div>
       <div class="grid">${cells}</div>
     </div>
@@ -974,6 +1015,31 @@ function pinCard() {
 }
 document.addEventListener("input", (ev) => { if (ev.target.classList?.contains("numonly")) ev.target.value = ev.target.value.replace(/\D/g, ""); });
 
+
+// ----- Administration (Nelson) : invitations par lien + droits de chaque profil -----
+const PERM_DEFS = [["tasks", "✅ Tâches"], ["sport", "🏋️ Sport et objectifs"], ["astro", "✨ Astro"], ["integrations", "🔗 Connexions (Hevy, montre, Google Agenda)"]];
+const inviteUrl = (c) => location.origin + location.pathname + "?invite=" + c;
+function loadAdmin() { rpc("get_admin", { p_token: token }).then((d) => { state.admin = d; if (ui.admin) render(); }).catch(() => toast("Chargement impossible")); }
+function permRow(on, attrs, label) { return `<button type="button" class="prow ${on ? "on" : ""}" role="switch" aria-checked="${on}" ${attrs}><span>${label}</span><i class="pk"></i></button>`; }
+function viewAdmin() {
+  const ad = state.admin || { users: [], invites: [] }, dp = ui.invPerms || { tasks: true, sport: true, astro: true, integrations: true };
+  const fmt = (x) => new Date(x).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+  const invs = ad.invites.map((i) => `<div class="inv"><div><b>${esc(i.label || "Invitation")}</b><small>valable jusqu'au ${fmt(i.expires)} · ${PERM_DEFS.filter(([k]) => i.perms[k] === false).map(([, l]) => "sans " + l.replace(/^\S+\s/, "")).join(", ") || "tous les droits"}</small></div>
+      <div class="btn-line"><button class="btn small" data-act="inv-copy" data-code="${i.code}">Copier le lien</button><button class="btn small danger" data-act="inv-revoke" data-code="${i.code}">Annuler</button></div></div>`).join("");
+  const users = ad.users.map((u) => `<div class="usr"><div class="usr-h"><i class="dot-lg" style="background:${u.color}"></i><b>${esc(u.name)}</b><button class="del" data-act="del-profile" data-id="${u.id}" aria-label="Supprimer">×</button></div>
+      ${PERM_DEFS.map(([k, l]) => permRow(u.perms[k] !== false, `data-act="perm-toggle" data-id="${u.id}" data-k="${k}"`, l)).join("")}</div>`).join("");
+  return `<div class="head"><div><h1>Administration</h1><div class="sub">Invitations et droits</div></div><button class="btn small" data-act="admin-close">← Réglages</button></div>
+    <div class="card"><h3>Inviter quelqu'un</h3>
+      <p class="muted">Crée un lien à envoyer. La personne choisit son prénom, son e-mail et son code, puis a son propre calendrier (sans Nelson ni Sophie). Le lien est valable 7 jours et ne sert qu'une fois.</p>
+      <input id="invLabel" maxlength="40" placeholder="Pour qui ? (juste pour toi, ex. Maman)" style="width:100%;margin-bottom:8px">
+      ${PERM_DEFS.map(([k, l]) => permRow(dp[k] !== false, `data-act="inv-perm" data-k="${k}"`, l)).join("")}
+      <div class="btn-line"><button class="btn small primary" data-act="inv-create">Créer le lien d'invitation</button></div>
+      ${invs ? `<h4 class="subh">Invitations en attente</h4>${invs}` : ""}</div>
+    <div class="card"><h3>Profils invités</h3>
+      <p class="muted">Ce que chacun peut utiliser. Chacun ne voit que ses propres données ; seuls Nelson et Sophie partagent le calendrier commun.</p>
+      ${users || `<div class="empty">Aucun profil invité pour l'instant.</div>`}</div>`;
+}
+
 // ----- Réglages -----
 function viewSettings() {
   const lock = cloud && !isAdmin; // en ligne, seul l'admin gère les profils
@@ -998,8 +1064,9 @@ function viewSettings() {
       <p class="muted">Nelson et Sophie ont chacun leur calendrier et partagent le calendrier « Commun ». Les autres profils sont de simples noms avec leur propre calendrier privé.</p>
     </div>
     ${linkCard}
+    ${cloud && isAdmin ? `<div class="card"><h3>Administration</h3><p class="muted">Invite de nouvelles personnes par lien et choisis ce que chacun peut utiliser.</p><div class="btn-line"><button class="btn small primary" data-act="admin-open">Gérer les invitations et les droits</button></div></div>` : ""}
     ${cloud ? pinCard() : ""}
-    <div class="card">
+    <div class="card" ${permOff("integrations") ? "hidden" : ""}>
       <h3>Google Agenda</h3>
       <p class="muted">${!gReady()
         ? "Cette fonction sera activée dès que la connexion Google aura été configurée."
@@ -1010,7 +1077,7 @@ function viewSettings() {
         ? `<button class="btn small danger" data-act="gcal-disconnect">Déconnecter Google Agenda</button>`
         : `<button class="btn small" data-act="gcal-connect">Connecter mon Google Agenda</button>`}</div>` : ""}
     </div>
-    ${cloud ? hevyCard() + watchCard() + linksCard() : ""}
+    ${cloud && !permOff("integrations") ? hevyCard() + watchCard() + linksCard() : ""}
     ${pushCard()}
     <div class="card">
       <h3>Sauvegarde</h3>
@@ -1133,7 +1200,7 @@ document.addEventListener("click", (ev) => {
   if (el.classList.contains("tab")) { ui.tab = el.dataset.tab; render(true); window.scrollTo(0, 0); return; }
 
   const act = el.dataset.act;
-  if (viewing() && ["new-event", "edit-event", "del-event", "new-task", "del-task", "save-prog", "save-event", "save-task", "profile", "pole-toggle", "goal-set", "goal-save", "hevy-refresh", "watch-sync", "watch-remove", "strava-save", "garmin-save"].includes(act)) { toast("Lecture seule : tu consultes le profil de " + (prof(ui.viewAs)?.name || "l'autre")); return; }
+  if (viewing() && ["new-event", "edit-event", "del-event", "new-task", "del-task", "save-prog", "save-event", "save-task", "profile", "log-toggle", "goal-set", "goal-save", "custom-add", "custom-del", "hevy-refresh", "watch-sync", "watch-remove", "strava-save", "garmin-save"].includes(act)) { toast("Lecture seule : tu consultes le profil de " + (prof(ui.viewAs)?.name || "l'autre")); return; }
   switch (act) {
     case "vis-switch": {
       const inp = document.getElementById(el.dataset.for), pub = inp.value !== el.dataset.pub;
@@ -1143,27 +1210,67 @@ document.addEventListener("click", (ev) => {
       const h = el.parentNode.querySelector(".vhint"); if (h) h.textContent = pub ? prof("nelson").name + " et " + prof("sophie").name + " le voient" : "Visible par toi seul";
       break;
     }
-    case "pole-toggle": {
-      const day = el.dataset.day, on = !hasPole(me, day);
-      state.logs = (state.logs || []).filter((l) => !(l.owner === me && l.kind === "pole" && String(l.day).slice(0, 10) === day));
-      if (on) state.logs.push({ owner: me, day, kind: "pole" });
+    case "admin-open": ui.admin = true; render(true); loadAdmin(); break;
+    case "admin-close": ui.admin = false; render(true); break;
+    case "inv-perm": ui.invPerms = ui.invPerms || { tasks: true, sport: true, astro: true, integrations: true }; ui.invPerms[el.dataset.k] = ui.invPerms[el.dataset.k] === false; render(); break;
+    case "inv-create": {
+      const perms = {}; PERM_DEFS.forEach(([k]) => { perms[k] = (ui.invPerms || {})[k] !== false; });
+      rpc("create_invite", { p_token: token, p_label: ($("#invLabel").value || "").trim(), p_perms: perms }).then(async (code) => {
+        ui.invPerms = null; loadAdmin();
+        try { await navigator.clipboard.writeText(inviteUrl(code)); toast("Lien copié : envoie-le à la personne"); } catch (e) { prompt("Copie ce lien :", inviteUrl(code)); }
+      }).catch(() => toast("Création impossible"));
+      break;
+    }
+    case "inv-copy": navigator.clipboard.writeText(inviteUrl(el.dataset.code)).then(() => toast("Lien copié")).catch(() => prompt("Copie ce lien :", inviteUrl(el.dataset.code))); break;
+    case "inv-revoke":
+      if (!confirm("Annuler cette invitation ? Le lien ne fonctionnera plus.")) break;
+      rpc("revoke_invite", { p_token: token, p_code: el.dataset.code }).then(() => { toast("Invitation annulée"); loadAdmin(); }).catch(() => toast("Action impossible"));
+      break;
+    case "perm-toggle": {
+      const u = (state.admin?.users || []).find((x) => x.id === el.dataset.id); if (!u) break;
+      u.perms = { ...u.perms, [el.dataset.k]: u.perms[el.dataset.k] === false }; render();
+      rpc("set_perms", { p_token: token, p_id: u.id, p_perms: u.perms }).catch(() => { toast("Enregistrement impossible"); loadAdmin(); });
+      break;
+    }
+    case "log-toggle": {
+      const day = el.dataset.day, kind = el.dataset.kind, on = !hasLog(me, day, kind);
+      state.logs = (state.logs || []).filter((l) => !(l.owner === me && l.kind === kind && lday(l) === day));
+      if (on) state.logs.push({ owner: me, day, kind });
       render(); lastSnap = "";
-      rpc("set_sport_log", { p_token: token, p_day: day, p_kind: "pole", p_on: on }).then(() => toast(on ? "Pole dance ajouté 🩰" : "Pole dance retiré")).catch(() => { toast("Enregistrement impossible"); pull(); });
+      rpc("set_sport_log", { p_token: token, p_day: day, p_kind: kind, p_on: on }).catch(() => { toast("Enregistrement impossible"); pull(); });
       break;
     }
     case "goal-set": {
-      const cur = goalFor(me, weekMon(toISO(new Date()))) || { gym: 0, pole: 0 };
-      ui.goalDraft = ui.goalDraft || { gym: cur.gym, pole: cur.pole };
+      const cur = targetsOf(goalFor(me, weekMon(toISO(new Date()))));
+      ui.goalDraft = ui.goalDraft || { ...cur };
       ui.goalDraft[el.dataset.k] = Number(el.dataset.v); render(); break;
     }
     case "goal-save": {
       const d = ui.goalDraft; if (!d) break; const mon = weekMon(toISO(new Date()));
-      state.goals = (state.goals || []).filter((g) => !(g.owner === me && String(g.from).slice(0, 10) === mon)).concat([{ owner: me, from: mon, gym: d.gym, pole: d.pole }]);
+      const t = {}; kindsOf(me).forEach(([k]) => { t[k] = d[k] || 0; });
+      state.goals = (state.goals || []).filter((g) => !(g.owner === me && String(g.from).slice(0, 10) === mon)).concat([{ owner: me, from: mon, targets: t, gym: t.gym || 0, pole: t.pole || 0 }]);
       ui.goalDraft = null; render(); lastSnap = "";
-      rpc("set_sport_goal", { p_token: token, p_gym: d.gym, p_pole: d.pole }).then(() => toast("Objectif enregistré 🎯")).catch(() => { toast("Enregistrement impossible"); pull(); });
+      rpc("set_sport_targets", { p_token: token, p_targets: t }).then(() => toast("Objectif enregistré 🎯")).catch(() => { toast("Enregistrement impossible"); pull(); });
       break;
     }
-    case "body-p": ui.bodyP = el.dataset.v === "week" ? "week" : "month"; render(); break;
+    case "custom-add": {
+      const name = ($("#cuName").value || "").trim();
+      if (!name) { $("#cuName").focus(); break; }
+      if (customOf(me).length >= 8) { toast("8 activités perso maximum"); break; }
+      const id = "c_" + Math.random().toString(36).slice(2, 8).replace(/[^a-z0-9]/g, "x");
+      state.custom = (state.custom || []).concat([{ owner: me, id, name }]); render(); lastSnap = "";
+      rpc("set_sport_custom", { p_token: token, p_id: id, p_name: name }).then(() => toast("Activité ajoutée ✨")).catch(() => { toast("Enregistrement impossible"); pull(); });
+      break;
+    }
+    case "custom-del": {
+      const id = el.dataset.id, c = customOf(me).find((x) => x.id === id);
+      if (!c || !confirm(`Supprimer « ${c.name} » ? Les jours cochés pour cette activité seront effacés.`)) break;
+      state.custom = state.custom.filter((x) => !(x.owner === me && x.id === id)); state.logs = (state.logs || []).filter((l) => !(l.owner === me && l.kind === id));
+      if (ui.goalDraft) delete ui.goalDraft[id];
+      render(); lastSnap = "";
+      rpc("delete_sport_custom", { p_token: token, p_id: id }).catch(() => { toast("Action impossible"); pull(); });
+      break;
+    }
     case "goto-goal": ui.tab = "tasks"; render(true); setTimeout(() => document.getElementById("sport-goal")?.scrollIntoView({ behavior: "smooth", block: "center" }), 80); break;
     case "view-as": ui.viewAs = el.dataset.id === me ? null : el.dataset.id; render(); break;
     case "pick": ui.selected = el.dataset.date; render(); break;
@@ -1324,6 +1431,19 @@ document.addEventListener("click", (ev) => {
       }).catch(() => { ui.pc = { msg: "Connexion impossible." }; render(); });
       break;
     }
+    case "signup": {
+      const nm = $("#suName").value.trim(), em = $("#suMail").value.trim(), p1 = $("#suPin").value, p2 = $("#suPin2").value, err = $("#lgErr");
+      err.textContent = "";
+      if (nm.length < 2 || !em) { err.textContent = "Saisis ton prénom et ton e-mail."; break; }
+      if (!/^\d{6,12}$/.test(p1)) { err.textContent = "Le code doit faire 6 à 12 chiffres."; break; }
+      if (p1 !== p2) { err.textContent = "Les deux codes ne sont pas identiques."; break; }
+      el.disabled = true;
+      rpc("claim_invite", { p_code: INVITE, p_name: nm, p_email: em, p_pin: p1 }).then((r) => {
+        if (r?.token) { try { localStorage.setItem(TOKEN_KEY, r.token); } catch (e) {} location.replace(location.pathname); }
+        else { err.textContent = r?.error || "Création impossible."; el.disabled = false; }
+      }).catch(() => { err.textContent = "Création impossible, vérifie ta connexion internet."; el.disabled = false; });
+      break;
+    }
     case "login": {
       const em = $("#lgMail").value.trim(), pin = pinCode, err = $("#lgErr");
       err.textContent = "";
@@ -1451,7 +1571,7 @@ let lastSnap = "";
 async function pull() {
   try {
     const d = await rpc("get_data", { p_token: token });
-    try { d.sport = await rpc("get_sport", { p_token: token }); } catch (e) { d.sport = { goals: state.goals || [], logs: state.logs || [], watch: state.watch || [], acts: state.acts || [] }; }
+    try { d.sport = await rpc("get_sport", { p_token: token }); } catch (e) { d.sport = { goals: state.goals || [], logs: state.logs || [], watch: state.watch || [], acts: state.acts || [], custom: state.custom || [], perms: state.perms || {} }; }
     const snap = JSON.stringify(d);
     me = d.me.id; isAdmin = !!d.me.admin; gShared = !!d.me.gcal_shared; hevyOn = !!d.me.hevy; hevySyncAt = d.me.hevy_sync || null;
     const first = !loaded;
@@ -1459,7 +1579,7 @@ async function pull() {
       lastSnap = snap;
       const typing = sheet.open || document.activeElement?.matches?.("input, select"); // ne pas casser une saisie en cours
       const loc = new Map(state.tasks.filter((t) => pendingProg.has(t.id)).map((t) => [t.id, t]));
-      state.profiles = d.profiles; state.events = d.events; state.gcalShared = d.gcal || []; state.workouts = d.workouts || []; state.goals = d.sport?.goals || []; state.logs = d.sport?.logs || []; state.watch = d.sport?.watch || []; state.acts = d.sport?.acts || [];
+      state.profiles = d.profiles; state.events = d.events; state.gcalShared = d.gcal || []; state.workouts = d.workouts || []; state.goals = d.sport?.goals || []; state.logs = d.sport?.logs || []; state.watch = d.sport?.watch || []; state.acts = d.sport?.acts || []; state.custom = d.sport?.custom || []; state.perms = d.sport?.perms || {};
       // un % pas encore sauvegardé garde SA valeur locale (ma part), le reste vient de la base
       state.tasks = d.tasks.map((t) => { const l = loc.get(t.id); return l ? Object.assign({}, t, { [myField(t)]: l[myField(t)] }) : t; });
       fixColors(state.profiles);
@@ -1474,7 +1594,7 @@ async function pull() {
       alert("Session expirée : reconnecte-toi avec ton e-mail et ton code."); location.reload(); return;
     }
     if (!loaded) { // hors connexion : dernière version connue
-      try { const d = JSON.parse(localStorage.getItem(CACHE_KEY)); if (d) { me = d.me.id; isAdmin = !!d.me.admin; gShared = !!d.me.gcal_shared; state.gcalShared = d.gcal || []; state.workouts = d.workouts || []; state.goals = d.sport?.goals || []; state.logs = d.sport?.logs || []; state.watch = d.sport?.watch || []; state.acts = d.sport?.acts || []; hevyOn = !!d.me.hevy; state.profiles = d.profiles; state.events = d.events; state.tasks = d.tasks; loaded = true; render(); toast("Hors connexion : dernière version affichée"); } } catch (x) {}
+      try { const d = JSON.parse(localStorage.getItem(CACHE_KEY)); if (d) { me = d.me.id; isAdmin = !!d.me.admin; gShared = !!d.me.gcal_shared; state.gcalShared = d.gcal || []; state.workouts = d.workouts || []; state.goals = d.sport?.goals || []; state.logs = d.sport?.logs || []; state.watch = d.sport?.watch || []; state.acts = d.sport?.acts || []; state.custom = d.sport?.custom || []; state.perms = d.sport?.perms || {}; hevyOn = !!d.me.hevy; state.profiles = d.profiles; state.events = d.events; state.tasks = d.tasks; loaded = true; render(); toast("Hors connexion : dernière version affichée"); } } catch (x) {}
     }
   }
 }
