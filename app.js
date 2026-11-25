@@ -29,6 +29,39 @@ function migrate(old) {
   return { profiles: structuredClone(defaultState.profiles), events: (old.events || []).map(fix), tasks: (old.tasks || []).map(fix) };
 }
 
+// ----- Mode en ligne : le lien personnel (…/#k=jeton) est gardé sur ce téléphone -----
+const TOKEN_KEY = "iwi2me-token", CACHE_KEY = "iwi2me-cache";
+const CFG = window.IWI_CONFIG || {};
+(function readLink() {
+  const m = location.hash.match(/k=([0-9a-f-]{36})/i);
+  if (m) {
+    try { localStorage.setItem(TOKEN_KEY, m[1]); } catch (e) {}
+    history.replaceState(null, "", location.pathname + location.search); // le jeton disparaît de la barre d'adresse
+  }
+})();
+let token = null;
+try { token = localStorage.getItem(TOKEN_KEY); } catch (e) {}
+const cloud = !!(token && CFG.url && CFG.key);
+let loaded = !cloud;   // en ligne : on attend la première réponse de la base
+let isAdmin = false;
+
+// Appel d'une fonction de la base (seul point d'entrée : la clé publique + le jeton du profil)
+async function rpc(fn, args) {
+  const r = await fetch(`${CFG.url}/rest/v1/rpc/${fn}`, {
+    method: "POST", headers: { apikey: CFG.key, "Content-Type": "application/json" }, body: JSON.stringify(args)
+  });
+  const t = await r.text();
+  if (!r.ok) throw new Error(t);
+  return t ? JSON.parse(t) : null;
+}
+// Envoie une modification à la base (la mise à jour de l'écran est déjà faite, localement)
+function push(fn, args) {
+  if (!cloud) return;
+  rpc(fn, Object.assign({ p_token: token }, args)).catch((e) => { console.warn(fn, e); toast("Hors connexion : modification non enregistrée"); });
+}
+const evArgs = (e) => ({ p_id: e.id, p_title: e.title, p_date: e.date, p_time: e.time || "", p_owner: e.owner, p_scope: e.scope });
+const tkArgs = (t) => ({ p_id: t.id, p_title: t.title, p_period: t.period, p_key: t.key, p_progress: t.progress, p_owner: t.owner, p_scope: t.scope });
+
 function load() {
   try {
     const raw = localStorage.getItem(KEY);
@@ -39,6 +72,7 @@ function load() {
   return structuredClone(defaultState);
 }
 function save() {
+  if (cloud) return; // en ligne, les données vivent dans la base (push)
   try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
 }
 
@@ -47,7 +81,8 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 
 // Profil actif sur cet appareil (par défaut Nelson, l'admin)
 let me = (() => { try { return localStorage.getItem(SESSION); } catch (e) { return null; } })();
-if (!state.profiles.some((p) => p.id === me)) me = "nelson";
+if (cloud) me = null; // en ligne, le profil vient du lien
+else if (!state.profiles.some((p) => p.id === me)) me = "nelson";
 const prof = (id) => state.profiles.find((p) => p.id === id);
 const isPair = (id) => PAIR.includes(id);
 
@@ -127,6 +162,7 @@ const hero = $("#hero");
 function render(animate = false) {
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("on", t.dataset.tab === ui.tab));
   renderHero();
+  if (!loaded) { view.innerHTML = `<div class="empty">Chargement…</div>`; return; }
   if (ui.tab === "cal") view.innerHTML = viewCalendar();
   else if (ui.tab === "tasks") view.innerHTML = viewTasks();
   else view.innerHTML = viewSettings();
@@ -137,6 +173,7 @@ function render(animate = false) {
 
 // ----- Barre profils + filtre perso/commun -----
 function profileBar() {
+  if (cloud) return "";
   const chips = state.profiles.map((p) => `<button class="pchip ${p.id === me ? "on" : ""}" style="--c:${p.color}" data-act="profile" data-id="${p.id}"><i></i>${esc(p.name)}</button>`).join("");
   return `<div class="pbar">${chips}<button class="pchip add" data-act="new-profile" aria-label="Ajouter un profil">+</button></div>`;
 }
@@ -257,31 +294,39 @@ function viewTasks() {
 
 // ----- Réglages -----
 function viewSettings() {
+  const lock = cloud && !isAdmin; // en ligne, seul l'admin gère les profils
   const rows = state.profiles.map((p) => `
       <div class="set-row"><i class="dot-lg" style="background:${p.color}"></i>
-        <input data-pname="${p.id}" value="${esc(p.name)}" maxlength="24">
-        ${p.id === "nelson" ? `<span class="tag-admin">admin</span>` : p.id === "sophie" ? "" : `<button class="del" data-act="del-profile" data-id="${p.id}" aria-label="Supprimer">×</button>`}
+        <input data-pname="${p.id}" value="${esc(p.name)}" maxlength="24" ${lock || (cloud && !isAdmin && p.id !== me) ? "disabled" : ""}>
+        ${p.admin || p.id === "nelson" ? `<span class="tag-admin">admin</span>` : ""}
+        ${cloud && isAdmin && p.id !== me ? `<button class="mini" data-act="copy-link" data-id="${p.id}">Lien</button>` : ""}
+        ${!PAIR.includes(p.id) && (!cloud || isAdmin) ? `<button class="del" data-act="del-profile" data-id="${p.id}" aria-label="Supprimer">×</button>` : ""}
       </div>`).join("");
+  const linkCard = cloud
+    ? (isAdmin ? `<div class="card"><h3>Liens personnels</h3>
+        <p class="muted">Chaque profil a son lien secret : la personne qui l'ouvre devient ce profil sur son téléphone. Envoie celui de Sophie à Sophie uniquement. Un lien régénéré invalide l'ancien.</p>
+        <div class="btn-line"><button class="btn small" data-act="copy-link" data-id="sophie">Copier le lien de Sophie</button></div>
+        <div class="btn-line"><button class="btn small" data-act="regen-link" data-id="sophie">Régénérer le lien de Sophie</button></div>
+        <div class="btn-line"><button class="btn small" data-act="copy-link" data-id="${me}">Copier mon lien (autre téléphone)</button></div></div>`
+      : `<div class="card"><h3>Ton espace</h3><p class="muted">Tu es connectée avec ton lien personnel. Ne le partage pas : il donne accès à ton calendrier.</p></div>`)
+    : `<div class="card"><h3>Mode sur ce téléphone</h3><p class="muted">Pour utiliser les calendriers à deux, ouvre ton lien personnel (celui que Nelson t'envoie, ou le sien).</p></div>`;
   return `
     <div class="head"><div><h1>Réglages</h1><div class="sub">Personnalise ton espace</div></div></div>
     <div class="card">
       <h3>Profils</h3>
       ${rows}
-      <button class="add-btn" data-act="new-profile">+ Ajouter un profil</button>
+      ${!lock ? `<button class="add-btn" data-act="new-profile">+ Ajouter un profil</button>` : ""}
       <p class="muted">Nelson et Sophie ont chacun leur calendrier et partagent le calendrier « Commun ». Les autres profils sont de simples noms avec leur propre calendrier privé.</p>
     </div>
-    <div class="card">
-      <h3>Liens personnels</h3>
-      <p class="muted">Bientôt : un lien unique pour Nelson (le tien) et un pour Sophie à lui envoyer. Elle seule aura le profil Sophie. Cela demande une petite base en ligne, étape suivante.</p>
-    </div>
+    ${linkCard}
     <div class="card">
       <h3>Sauvegarde</h3>
-      <p class="muted">Pour l'instant, les données restent sur ce téléphone. Exporte-les pour les garder en sécurité ou les transférer.</p>
+      <p class="muted">${cloud ? "Tes données sont enregistrées en ligne. Tu peux aussi en garder une copie." : "Les données restent sur ce téléphone. Exporte-les pour les garder en sécurité ou les transférer."}</p>
       <div class="btn-line">
         <button class="btn small" data-act="export">Exporter</button>
         <button class="btn small" data-act="import">Importer</button>
       </div>
-      <div class="btn-line"><button class="btn small danger" data-act="reset">Tout effacer</button></div>
+      <div class="btn-line">${cloud ? `<button class="btn small danger" data-act="logout">Se déconnecter de ce téléphone</button>` : `<button class="btn small danger" data-act="reset">Tout effacer</button>`}</div>
       <input type="file" id="importFile" accept="application/json" hidden>
     </div>
     <div class="card">
@@ -296,11 +341,11 @@ function viewSettings() {
 const sheet = $("#sheet"), sheetForm = $("#sheetForm");
 // Champ « Pour » : Nelson et Sophie peuvent remplir à la place de l'autre, ou pour le commun.
 // Les autres profils n'ont pas le choix : tout va dans leur propre calendrier.
-const scopeField = () => isPair(me)
+const scopeField = (forId) => isPair(me)
   ? `<div class="field"><label>Pour</label><select id="fScope">
-      <option value="nelson" ${me === "nelson" && ui.filter !== "commun" ? "selected" : ""}>${esc(prof("nelson").name)}</option>
-      <option value="sophie" ${me === "sophie" && ui.filter !== "commun" ? "selected" : ""}>${esc(prof("sophie").name)}</option>
-      <option value="commun" ${ui.filter === "commun" ? "selected" : ""}>Commun (${esc(prof("nelson").name)} + ${esc(prof("sophie").name)})</option>
+      <option value="nelson" ${(forId || (ui.filter === "commun" ? "commun" : me)) === "nelson" ? "selected" : ""}>${esc(prof("nelson").name)}</option>
+      <option value="sophie" ${(forId || (ui.filter === "commun" ? "commun" : me)) === "sophie" ? "selected" : ""}>${esc(prof("sophie").name)}</option>
+      <option value="commun" ${!forId && ui.filter === "commun" ? "selected" : ""}>Commun (${esc(prof("nelson").name)} + ${esc(prof("sophie").name)})</option>
     </select></div>`
   : "";
 // Renvoie { owner, scope } selon le choix du champ « Pour »
@@ -312,7 +357,7 @@ function notifyFor(f) {
   if (f.scope === "perso" && f.owner !== me) toast(`Ajouté au calendrier de ${prof(f.owner).name}`);
 }
 
-function openEventSheet() {
+function openEventSheet(forId) {
   sheetForm.innerHTML = `<div class="sheet">
     <h2>Nouvel événement</h2>
     <div class="field"><label>Titre</label><input type="text" id="fTitle" placeholder="Dîner chez les parents" autocomplete="off"></div>
@@ -320,7 +365,7 @@ function openEventSheet() {
       <div class="field"><label>Date</label><input type="date" id="fDate" value="${ui.selected}"></div>
       <div class="field"><label>Heure</label><input type="time" id="fTime"></div>
     </div>
-    ${scopeField()}
+    ${scopeField(forId)}
     <div class="actions"><button type="button" class="btn" data-act="close">Annuler</button><button type="button" class="btn primary" data-act="save-event">Ajouter</button></div>
   </div>`;
   sheet.showModal();
@@ -365,7 +410,8 @@ document.addEventListener("click", (ev) => {
       if (!title) { $("#fTitle").focus(); return; }
       const date = $("#fDate").value || ui.selected;
       const f = readFor();
-      state.events.push({ id: uid(), title, date, time: $("#fTime").value, ...f });
+      const ev = { id: uid(), title, date, time: $("#fTime").value, ...f };
+      state.events.push(ev); push("upsert_event", evArgs(ev));
       save(); sheet.close(); ui.selected = date; ui.month = startOfMonth(fromISO(date)); render(); notifyFor(f); break;
     }
     case "save-task": {
@@ -373,11 +419,12 @@ document.addEventListener("click", (ev) => {
       if (!title) { $("#fTitle").focus(); return; }
       const period = $("#fPeriod").value;
       const f = readFor();
-      state.tasks.push({ id: uid(), title, period, key: periodKey(period, fromISO(ui.selected)), ...f, progress: 0 });
+      const tk = { id: uid(), title, period, key: periodKey(period, fromISO(ui.selected)), ...f, progress: 0 };
+      state.tasks.push(tk); push("upsert_task", tkArgs(tk));
       save(); sheet.close(); ui.period = period; render(); notifyFor(f); break;
     }
-    case "del-event": state.events = state.events.filter((e) => e.id !== el.dataset.id); save(); render(); break;
-    case "del-task": state.tasks = state.tasks.filter((t) => t.id !== el.dataset.id); save(); render(); break;
+    case "del-event": state.events = state.events.filter((e) => e.id !== el.dataset.id); push("delete_event", { p_id: el.dataset.id }); save(); render(); break;
+    case "del-task": state.tasks = state.tasks.filter((t) => t.id !== el.dataset.id); push("delete_task", { p_id: el.dataset.id }); save(); render(); break;
     case "profile": setMe(el.dataset.id); break;
     case "filter": ui.filter = el.dataset.f; render(); break;
     case "new-profile": {
@@ -385,8 +432,12 @@ document.addEventListener("click", (ev) => {
       if (!name) break;
       const color = EXTRA_COLORS[(state.profiles.length - 2) % EXTRA_COLORS.length];
       const id = "p" + uid();
-      state.profiles.push({ id, name, color });
-      save(); setMe(id); break;
+      if (cloud) {
+        rpc("create_profile", { p_token: token, p_id: id, p_name: name, p_color: color })
+          .then(() => { state.profiles.push({ id, name, color }); render(); toast(`Profil ${name} créé : copie son lien`); })
+          .catch(() => toast("Impossible de créer le profil"));
+      } else { state.profiles.push({ id, name, color }); save(); setMe(id); }
+      break;
     }
     case "del-profile": {
       const p = prof(el.dataset.id);
@@ -394,11 +445,27 @@ document.addEventListener("click", (ev) => {
         state.profiles = state.profiles.filter((x) => x.id !== p.id);
         state.events = state.events.filter((x) => x.owner !== p.id || x.scope === "commun");
         state.tasks = state.tasks.filter((x) => x.owner !== p.id || x.scope === "commun");
-        if (me === p.id) me = "nelson";
+        if (!cloud && me === p.id) me = "nelson";
+        push("delete_profile", { p_id: p.id });
         save(); render();
       }
       break;
     }
+    case "copy-link": case "regen-link": {
+      const regen = act === "regen-link";
+      if (regen && !confirm("Régénérer ce lien ? L'ancien ne fonctionnera plus.")) break;
+      rpc("get_profile_link", { p_token: token, p_id: el.dataset.id, p_regenerate: regen })
+        .then(async (t) => {
+          const link = location.origin + location.pathname + "#k=" + t;
+          try { await navigator.clipboard.writeText(link); toast(regen ? "Nouveau lien copié" : "Lien copié"); }
+          catch (e) { prompt("Copie ce lien :", link); }
+        })
+        .catch(() => toast("Action réservée à l'admin"));
+      break;
+    }
+    case "logout":
+      if (confirm("Se déconnecter de ce téléphone ? Tu pourras te reconnecter avec ton lien.")) { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(CACHE_KEY); location.reload(); }
+      break;
     case "zoom": $("#photo").showModal(); break;
     case "export": exportData(); break;
     case "import": $("#importFile").click(); break;
@@ -429,7 +496,12 @@ document.addEventListener("input", (ev) => {
   if (el.dataset.pname) { const p = prof(el.dataset.pname); if (p) p.name = el.value.trim() || p.name; }
 });
 document.addEventListener("change", (ev) => {
-  if (ev.target.dataset.act === "slide" || ev.target.dataset.pname) save();
+  if (ev.target.dataset.act === "slide") {
+    save();
+    const t = state.tasks.find((x) => x.id === ev.target.dataset.id);
+    if (t) push("upsert_task", tkArgs(t));
+  }
+  if (ev.target.dataset.pname) { save(); push("rename_profile", { p_id: ev.target.dataset.pname, p_name: prof(ev.target.dataset.pname).name }); }
   if (ev.target.id === "importFile") importData(ev.target.files[0]);
 });
 
@@ -449,6 +521,11 @@ function toast(msg) {
 }
 function setMe(id) {
   if (!prof(id)) return;
+  if (cloud) { // en ligne, on ne change pas de profil : toucher l'autre personnage = lui ajouter un événement
+    if (id === me) toast(`Calendrier de ${prof(id).name}`);
+    else if (isPair(me) && isPair(id)) openEventSheet(id);
+    return;
+  }
   me = id; ui.filter = "all";
   try { localStorage.setItem(SESSION, me); } catch (e) {}
   render();
@@ -489,7 +566,7 @@ function importData(file) {
   document.querySelectorAll(".spot").forEach((s) => s.addEventListener("click", () => {
     setMe(s.dataset.id);
     const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-    $("#view").scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+    if (!cloud || s.dataset.id === me) $("#view").scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
   }));
   // Fermer l'affiche en grand en la touchant
   $("#photo").addEventListener("click", () => $("#photo").close());
@@ -499,6 +576,56 @@ function importData(file) {
 // 9. DÉMARRAGE
 // ---------------------------------------------------------------
 render();
+
+// Charge les données du profil, puis rafraîchit régulièrement (pour voir ce que l'autre ajoute)
+let lastSnap = "";
+async function pull() {
+  try {
+    const d = await rpc("get_data", { p_token: token });
+    const snap = JSON.stringify(d);
+    me = d.me.id; isAdmin = !!d.me.admin;
+    const first = !loaded;
+    if (snap !== lastSnap) {
+      lastSnap = snap;
+      const typing = sheet.open || document.activeElement?.matches?.("input, select"); // ne pas casser une saisie en cours
+      state.profiles = d.profiles; state.events = d.events; state.tasks = d.tasks;
+      try { localStorage.setItem(CACHE_KEY, snap); } catch (e) {}
+      loaded = true;
+      if (first || !typing) render();
+    }
+    if (first) maybeImportLocal(d);
+  } catch (e) {
+    if (String(e.message).includes("lien invalide")) { // lien révoqué ou invalide
+      localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(CACHE_KEY);
+      alert("Ce lien n'est plus valide. Demande un nouveau lien à Nelson."); location.reload(); return;
+    }
+    if (!loaded) { // hors connexion : dernière version connue
+      try { const d = JSON.parse(localStorage.getItem(CACHE_KEY)); if (d) { me = d.me.id; isAdmin = !!d.me.admin; state.profiles = d.profiles; state.events = d.events; state.tasks = d.tasks; loaded = true; render(); toast("Hors connexion : dernière version affichée"); } } catch (x) {}
+    }
+  }
+}
+function startCloud() {
+  pull();
+  setInterval(() => { if (!document.hidden) pull(); }, 20000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) pull(); });
+}
+
+// Première connexion de Nelson : propose d'envoyer en ligne ce qui était déjà sur le téléphone
+function maybeImportLocal(d) {
+  if (d.me.id !== "nelson" || d.events.length || d.tasks.length) return;
+  try {
+    const raw = localStorage.getItem(KEY); if (!raw) return;
+    const old = JSON.parse(raw);
+    if (!old.events?.length && !old.tasks?.length) return;
+    if (!confirm(`Envoyer en ligne les ${old.events.length} événements et ${old.tasks.length} tâches de ce téléphone ?`)) return;
+    old.events.forEach((e) => { state.events.push(e); push("upsert_event", evArgs(e)); });
+    old.tasks.forEach((t) => { state.tasks.push(t); push("upsert_task", tkArgs(t)); });
+    localStorage.removeItem(KEY); render(); toast("Données envoyées en ligne");
+  } catch (e) {}
+}
+
+if (cloud) startCloud();
+
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
   navigator.serviceWorker.register("sw.js").catch(() => {});
 }

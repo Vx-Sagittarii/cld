@@ -243,3 +243,6 @@ button.chip-glass.zoom { border: 0; cursor: pointer; }
   opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 @media (prefers-reduced-motion: reduce) { .toast, .spot .tag { transition: none; } }
+
+.mini { padding: 6px 11px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 700; }
+.set-row input:disabled { opacity: .7; }
