@@ -368,3 +368,19 @@ body.login .tabbar, body.login #fab, body.login .fab { display: none !important;
 .nav-btn svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
 .task input[type=range]:disabled { opacity: .45; }
 .task .vis { font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+/* ---------- Objectifs (vue d'ensemble) ---------- */
+.goals h3 { margin-top: 0; }
+.goal { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 12px 10px; border-radius: 14px; background: rgba(255,255,255,.05); margin-bottom: 8px; color: var(--text); }
+.goal:active { background: rgba(255,255,255,.12); }
+.goal .g-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.goal .g-t b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.goal .g-t small { color: var(--muted); font-size: 12px; }
+.goal.soon .g-t small { color: #FFB86B; }
+.goal.done { opacity: .65; }
+.g-bar { height: 8px; border-radius: 6px; background: rgba(255,255,255,.12); overflow: hidden; }
+.g-bar span { display: block; height: 100%; border-radius: 6px; }
+.g-pct { font-weight: 700; min-width: 40px; text-align: right; }
+.g-go { color: var(--muted); font-size: 22px; }
+.task.flash { animation: flash 1.6s ease; }
+@keyframes flash { 0%, 60% { box-shadow: 0 0 0 3px var(--accent); border-radius: 14px; } 100% { box-shadow: 0 0 0 0 transparent; } }

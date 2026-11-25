@@ -98,7 +98,7 @@ const tp = (t) => t.scope === "commun" ? Math.round((t.progress + (t.progress_b 
 const myField = (t) => (t.scope === "commun" && me === "sophie") ? "progress_b" : "progress";
 const mine = (t) => t[myField(t)] || 0;
 const shown = (t) => persoView() ? mine(t) : tp(t); // volet Perso : seulement mon %, volet Commun : la moyenne
-const labelOf = (it) => persoView() ? (it.scope === "commun" ? "👥 Public" : "🔒 Privé") : (it.scope === "commun" ? "Commun" : (prof(it.owner)?.name || "?"));
+const labelOf = (it) => (it.google && it.owner !== me) ? `${prof(it.owner)?.name || "L'autre"} · Google` : persoView() ? (it.scope === "commun" ? "👥 Public" : "🔒 Privé") : (it.scope === "commun" ? "Commun" : (prof(it.owner)?.name || "?"));
 
 // État de l'interface (non sauvegardé)
 const ui = {
@@ -284,9 +284,14 @@ function render(animate = false) {
 // ---------------------------------------------------------------
 const GKEY = "iwi2me-gcal";
 const gcal = { on: false, token: null, loading: false, cache: {}, events: [], gisReady: null };
+let gShared = false;                       // mon Google Agenda est-il partagé avec l'autre ?
+const gScope = () => gShared ? "commun" : "perso";
+const partnerId = () => PAIR.find((x) => x !== me);
 try { gcal.on = localStorage.getItem(GKEY) === "1"; } catch (e) {}
 const gReady = () => !!CFG.googleClientId;
-const allEvents = () => gcal.on ? state.events.concat(gcal.events) : state.events;
+// Événements Google de l'autre (copie partagée, lecture seule)
+const partnerG = () => (state.gcalShared || []).filter((e) => e.owner !== me).map((e) => ({ id: "gp_" + e.owner + "_" + e.id, title: e.title, date: e.date, time: e.time || "", owner: e.owner, scope: "commun", google: true }));
+const allEvents = () => (gcal.on ? state.events.concat(gcal.events) : state.events).concat(cloud ? partnerG() : []);
 
 function loadGIS() {
   if (gcal.gisReady) return gcal.gisReady;
@@ -317,6 +322,7 @@ async function connectGoogle(silent) {
 function disconnectGoogle() {
   try { if (gcal.token && window.google) google.accounts.oauth2.revoke(gcal.token); } catch (e) {}
   gcal.on = false; gcal.token = null; gcal.cache = {}; gcal.events = [];
+  if (cloud && gShared) { gShared = false; rpc("set_gcal_shared", { p_token: token, p_shared: false }).catch(() => {}); } // la copie partagée est effacée
   try { localStorage.removeItem(GKEY); } catch (e) {}
   render(); toast("Google Agenda déconnecté");
 }
@@ -339,14 +345,16 @@ async function ensureGcal() {
       if (g.start?.dateTime) { // événement horaire
         const a = new Date(g.start.dateTime), b = g.end?.dateTime ? new Date(g.end.dateTime) : null;
         const same = b && toISO(a) === toISO(b);
-        list.push({ id: "g_" + g.id, title, date: toISO(a), time: `${pad(a.getHours())}:${pad(a.getMinutes())}` + (same ? `-${pad(b.getHours())}:${pad(b.getMinutes())}` : ""), owner: me, scope: "perso", google: true });
+        list.push({ id: "g_" + g.id, title, date: toISO(a), time: `${pad(a.getHours())}:${pad(a.getMinutes())}` + (same ? `-${pad(b.getHours())}:${pad(b.getMinutes())}` : ""), owner: me, scope: gScope(), google: true });
       } else if (g.start?.date) { // journée entière (éventuellement plusieurs jours)
         let d = fromISO(g.start.date); const end = fromISO(g.end?.date || g.start.date);
-        for (let i = 0; i < 31 && d < end; i++, d = addDays(d, 1)) list.push({ id: "g_" + g.id + "_" + i, title, date: toISO(d), time: "", owner: me, scope: "perso", google: true });
+        for (let i = 0; i < 31 && d < end; i++, d = addDays(d, 1)) list.push({ id: "g_" + g.id + "_" + i, title, date: toISO(d), time: "", owner: me, scope: gScope(), google: true });
       }
     });
     gcal.cache[key] = true;
     gcal.events = gcal.events.filter((e) => !list.some((x) => x.id === e.id)).concat(list);
+    if (cloud && gShared) // copie partagée pour l'autre (seulement si le partage est activé)
+      rpc("sync_gcal", { p_token: token, p_from: toISO(first), p_to: toISO(addDays(first, 41)), p_items: list.map((e) => ({ id: e.id, title: e.title, date: e.date, time: e.time })) }).catch(() => {});
     render();
   } catch (e) { toast("Google Agenda : chargement impossible"); }
   finally { gcal.loading = false; }
@@ -578,7 +586,40 @@ function viewTasks() {
           <button class="btn small save-prog" data-act="save-prog" data-id="${t.id}" ${pendingProg.has(t.id) ? "" : "hidden"}>Sauvegarder</button>
         </div>`; }).join("") || `<div class="empty">Ajoute une première tâche.</div>`}
       <button class="add-btn" data-act="new-task">+ Ajouter une tâche</button>
-    </div>`;
+    </div>
+    ${goalsCard()}`;
+}
+
+// ----- Objectifs : vue d'ensemble (semaine / mois / année) avec échéance et % en lecture seule -----
+function deadlineOf(t) {
+  if (t.period === "day") return fromISO(t.key);
+  if (t.period === "week") { const [y, w] = t.key.split("-W").map(Number); return addDays(addDays(mondayOf(new Date(y, 0, 4)), (w - 1) * 7), 6); }
+  if (t.period === "month") { const [y, m] = t.key.split("-").map(Number); return new Date(y, m, 0); }
+  return new Date(Number(t.key), 11, 31);
+}
+function startOfTask(t) {
+  if (t.period === "day") return fromISO(t.key);
+  if (t.period === "week") { const [y, w] = t.key.split("-W").map(Number); return addDays(mondayOf(new Date(y, 0, 4)), (w - 1) * 7); }
+  if (t.period === "month") { const [y, m] = t.key.split("-").map(Number); return new Date(y, m - 1, 1); }
+  return new Date(Number(t.key), 0, 1);
+}
+function goalsCard() {
+  const today = fromISO(toISO(new Date())), PL = { week: "Semaine", month: "Mois", year: "Année" };
+  const goals = state.tasks.filter((t) => t.period !== "day" && passes(t)).map((t) => ({ t, d: deadlineOf(t) }))
+    .filter((g) => g.d >= today).sort((a, b) => a.d - b.d || a.t.title.localeCompare(b.t.title)).slice(0, 12);
+  if (!goals.length) return "";
+  return `<div class="card goals"><h3>Objectifs à venir</h3>
+    ${goals.map(({ t, d }) => {
+      const left = Math.round((d - today) / 864e5), p = shown(t);
+      const when = left === 0 ? "aujourd'hui" : left === 1 ? "demain" : `dans ${left} j`;
+      return `<button class="goal ${p >= 100 ? "done" : left <= 3 ? "soon" : ""}" data-act="goto-task" data-id="${t.id}">
+        <i class="chip" style="background:${colorOf(t)}"></i>
+        <div class="g-t"><b>${esc(t.title)}</b>
+          <small>${PL[t.period]}${persoView() ? " · " + labelOf(t) : ""} · échéance ${d.getDate()} ${MOIS[d.getMonth()]} (${when})</small>
+          <div class="g-bar"><span style="width:${p}%;background:${colorOf(t)}"></span></div></div>
+        <span class="g-pct">${p >= 100 ? "✓" : p + "%"}</span><span class="g-go" aria-hidden="true">›</span></button>`;
+    }).join("")}
+    <small class="muted">Touche un objectif pour modifier son avancement.</small></div>`;
 }
 
 // ----- Rappels par notification (Web Push) -----
@@ -667,8 +708,9 @@ function viewSettings() {
       <p class="muted">${!gReady()
         ? "Affiche ton Google Agenda dans ton calendrier iwi2me (lecture seule). Cette fonction sera activée dès que la connexion Google aura été configurée."
         : gcal.on
-          ? "Connecté. Tes événements Google s'affichent dans ton calendrier perso, en lecture seule. Ils ne sont visibles que par toi, sur ce téléphone."
-          : "Affiche ton Google Agenda dans ton calendrier perso (lecture seule). Chacun connecte le sien ; rien n'est partagé avec l'autre."}</p>
+          ? (gShared ? `Connecté et partagé : ${esc(prof(partnerId())?.name || "l'autre")} voit tes événements Google (titre, date, heure) en lecture seule.` : "Connecté. Tes événements Google s'affichent dans ton calendrier, en lecture seule. Ils ne sont visibles que par toi.")
+          : "Affiche ton Google Agenda dans ton calendrier (lecture seule). Chacun connecte le sien, et tu peux choisir de le partager avec l'autre."}</p>
+      ${cloud && isPair(me) && gReady() ? `<div class="btn-line"><button class="btn small ${gShared ? "" : "primary"}" data-act="gcal-share">${gShared ? "Arrêter de partager mon agenda" : "Partager mon agenda avec " + esc(prof(partnerId())?.name || "l'autre")}</button></div>` : ""}
       ${gReady() ? `<div class="btn-line">${gcal.on
         ? `<button class="btn small danger" data-act="gcal-disconnect">Déconnecter Google Agenda</button>`
         : `<button class="btn small" data-act="gcal-connect">Connecter mon Google Agenda</button>`}</div>` : ""}
@@ -710,6 +752,13 @@ const scopeField = (forId) => isPair(me)
       <option value="sophie" ${forId === "sophie" ? "selected" : ""}>Privé · ${esc(prof("sophie").name)}</option>
     </select></div>`
   : "";
+// Modification : passer un événement de Public à Privé (toi) ou inversement
+const visEditField = (e) => (isPair(me) && (e.scope === "commun" || e.owner === me))
+  ? `<div class="field"><label>Visibilité</label><select id="fScope">
+      <option value="commun" ${e.scope === "commun" ? "selected" : ""}>Public (${esc(prof("nelson").name)} + ${esc(prof("sophie").name)})</option>
+      <option value="${me}" ${e.scope !== "commun" ? "selected" : ""}>Privé (juste moi)</option>
+    </select></div>`
+  : "";
 // Renvoie { owner, scope } selon le choix du champ « Pour »
 function readFor() {
   const v = $("#fScope") ? $("#fScope").value : me;
@@ -744,7 +793,7 @@ function openEventSheet(forId, edit) {
       <div class="field"><label>À (facultatif)</label><input type="time" id="fTimeEnd" value="${v.t2}"></div>
     </div>
     <div class="span-hint" id="spanHint"></div>
-    ${edit ? "" : scopeField(forId)}
+    ${edit ? visEditField(edit) : scopeField(forId)}
     <div class="two">
       <div class="field"><label>Répéter</label><select id="fRep">${opt("", "Jamais", m.rep)}${Object.keys(REP_LABEL).map((k) => opt(k, REP_LABEL[k], m.rep)).join("")}</select></div>
       <div class="field"><label>Rappel 🔔</label><select id="fRem">${opt("", "Aucun", m.rem)}${opt(0, "À l'heure", m.rem)}${opt(10, "10 min avant", m.rem)}${opt(60, "1 h avant", m.rem)}${opt(1440, "1 jour avant", m.rem)}</select></div>
@@ -821,7 +870,11 @@ document.addEventListener("click", (ev) => {
       const editId = sheetForm.dataset.edit;
       if (editId) {
         const o = state.events.find((x) => x.id === editId);
-        if (o) { Object.assign(o, { title, date, time, meta }); push("upsert_event", evArgs(o)); }
+        if (o) {
+          Object.assign(o, { title, date, time, meta });
+          if ($("#fScope")) { const f = readFor(); if (!(f.scope === "commun" && o.scope === "commun")) Object.assign(o, f); }
+          push("upsert_event", evArgs(o));
+        }
         save(); sheet.close(); ui.selected = date; ui.month = startOfMonth(fromISO(date)); render(); toast("Événement modifié"); break;
       }
       const f = readFor();
@@ -850,8 +903,22 @@ document.addEventListener("click", (ev) => {
     case "gcal-connect": connectGoogle(false); break;
     case "gcal-connect-silent": connectGoogle(true); break;
     case "gcal-disconnect": disconnectGoogle(); break;
+    case "gcal-share": {
+      const on = !gShared;
+      if (on && !gcal.on) { toast("Connecte d'abord ton Google Agenda"); break; }
+      gShared = on; gcal.events.forEach((e) => { e.scope = gScope(); }); if (on) gcal.cache = {};
+      rpc("set_gcal_shared", { p_token: token, p_shared: on }).then(() => { if (on && gcal.token) ensureGcal(); }).catch(() => toast("Action impossible pour le moment"));
+      render(); toast(on ? "Agenda partagé" : "Partage arrêté");
+      break;
+    }
     case "profile": setMe(el.dataset.id); break;
     case "filter": ui.filter = el.dataset.f; render(); break;
+    case "goto-task": {
+      const t = state.tasks.find((x) => x.id === el.dataset.id); if (!t) break;
+      const d = startOfTask(t); ui.period = t.period; ui.selected = toISO(d); ui.month = startOfMonth(d); render();
+      setTimeout(() => { const n = document.querySelector(`.task[data-id="${t.id}"]`); if (n) { n.scrollIntoView({ behavior: "smooth", block: "center" }); n.classList.add("flash"); setTimeout(() => n.classList.remove("flash"), 1800); } }, 80);
+      break;
+    }
     case "new-profile": {
       const name = (prompt("Nom du nouveau profil ?") || "").trim().slice(0, 24);
       if (!name) break;
@@ -1024,13 +1091,13 @@ async function pull() {
   try {
     const d = await rpc("get_data", { p_token: token });
     const snap = JSON.stringify(d);
-    me = d.me.id; isAdmin = !!d.me.admin;
+    me = d.me.id; isAdmin = !!d.me.admin; gShared = !!d.me.gcal_shared;
     const first = !loaded;
     if (snap !== lastSnap) {
       lastSnap = snap;
       const typing = sheet.open || document.activeElement?.matches?.("input, select"); // ne pas casser une saisie en cours
       const loc = new Map(state.tasks.filter((t) => pendingProg.has(t.id)).map((t) => [t.id, t]));
-      state.profiles = d.profiles; state.events = d.events;
+      state.profiles = d.profiles; state.events = d.events; state.gcalShared = d.gcal || [];
       // un % pas encore sauvegardé garde SA valeur locale (ma part), le reste vient de la base
       state.tasks = d.tasks.map((t) => { const l = loc.get(t.id); return l ? Object.assign({}, t, { [myField(t)]: l[myField(t)] }) : t; });
       fixColors(state.profiles);
@@ -1045,7 +1112,7 @@ async function pull() {
       alert("Session expirée : reconnecte-toi avec ton e-mail et ton code."); location.reload(); return;
     }
     if (!loaded) { // hors connexion : dernière version connue
-      try { const d = JSON.parse(localStorage.getItem(CACHE_KEY)); if (d) { me = d.me.id; isAdmin = !!d.me.admin; state.profiles = d.profiles; state.events = d.events; state.tasks = d.tasks; loaded = true; render(); toast("Hors connexion : dernière version affichée"); } } catch (x) {}
+      try { const d = JSON.parse(localStorage.getItem(CACHE_KEY)); if (d) { me = d.me.id; isAdmin = !!d.me.admin; gShared = !!d.me.gcal_shared; state.gcalShared = d.gcal || []; state.profiles = d.profiles; state.events = d.events; state.tasks = d.tasks; loaded = true; render(); toast("Hors connexion : dernière version affichée"); } } catch (x) {}
     }
   }
 }

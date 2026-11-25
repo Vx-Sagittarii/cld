@@ -440,3 +440,76 @@ begin
   on conflict (id) do update set title=excluded.title, updated_at=now()
     where _can_modify(me.id, tasks.owner, tasks.scope, tasks.created_by);
 end $$;
+
+-- ============ Migration 7 : Google Agenda partageable ============
+-- Si on active « Partager », l'appli envoie une copie des événements Google (titre, date, heure) pour que
+-- l'autre les voie en lecture seule. Rien n'est envoyé tant que le partage est désactivé ; en le désactivant, la copie est effacée.
+alter table profiles add column if not exists gcal_shared boolean not null default false;
+create table if not exists gcal_events (
+  id text not null, owner text not null references profiles(id) on delete cascade,
+  title text not null, date date not null, time text not null default '',
+  primary key (owner, id)
+);
+alter table gcal_events enable row level security;
+
+create or replace function set_gcal_shared(p_token uuid, p_shared boolean) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if not _is_pair(me.id) then raise exception 'interdit'; end if;
+  update profiles set gcal_shared = coalesce(p_shared, false) where id = me.id;
+  if not coalesce(p_shared, false) then delete from gcal_events where owner = me.id; end if;
+end $$;
+
+create or replace function sync_gcal(p_token uuid, p_from date, p_to date, p_items json) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if not _is_pair(me.id) then raise exception 'interdit'; end if;
+  if not me.gcal_shared then return; end if;
+  if p_to < p_from or p_to - p_from > 62 then raise exception 'période invalide'; end if;
+  delete from gcal_events where owner = me.id and date between p_from and p_to;
+  insert into gcal_events(id, owner, title, date, time)
+    select left(x.id, 120), me.id, left(coalesce(x.title, ''), 200), x.date, left(coalesce(x.time, ''), 11)
+    from json_to_recordset(p_items) as x(id text, title text, date date, time text)
+    where x.date between p_from and p_to limit 600
+  on conflict (owner, id) do update set title = excluded.title, date = excluded.date, time = excluded.time;
+end $$;
+
+create or replace function get_data(p_token uuid) returns json
+language plpgsql stable security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  return json_build_object(
+    'me', json_build_object('id', me.id, 'name', me.name, 'admin', me.is_admin, 'gcal_shared', me.gcal_shared),
+    'profiles', coalesce((select json_agg(json_build_object('id',id,'name',name,'color',color,'admin',is_admin) order by created_at)
+                          from profiles
+                          where me.is_admin or id = me.id or (_is_pair(me.id) and _is_pair(id))), '[]'::json),
+    'events', coalesce((select json_agg(json_build_object('id',id,'title',title,'date',date,'time',time,'owner',owner,'scope',scope,'meta',meta))
+                        from events where owner = me.id or (scope = 'commun' and _is_pair(me.id))), '[]'::json),
+    'tasks',  coalesce((select json_agg(json_build_object('id',id,'title',title,'period',period,'key',key,'progress',progress,'progress_b',progress_b,'owner',owner,'scope',scope))
+                        from tasks  where owner = me.id or (scope = 'commun' and _is_pair(me.id))), '[]'::json),
+    'gcal',   coalesce((select json_agg(json_build_object('id',g.id,'title',g.title,'date',g.date,'time',g.time,'owner',g.owner))
+                        from gcal_events g join profiles pr on pr.id = g.owner
+                        where _is_pair(me.id) and _is_pair(g.owner) and (g.owner = me.id or pr.gcal_shared)), '[]'::json)
+  );
+end $$;
+
+revoke all on function set_gcal_shared(uuid, boolean), sync_gcal(uuid, date, date, json) from public;
+grant execute on function set_gcal_shared(uuid, boolean), sync_gcal(uuid, date, date, json) to anon, authenticated;
+
+-- ============ Migration 8 : passer un événement de privé à public (et inversement) ============
+-- Public -> privé réservé à la personne qui a créé l'événement ; privé -> public possible pour le propriétaire.
+create or replace function upsert_event(p_token uuid, p_id text, p_title text, p_date date, p_time text, p_owner text, p_scope text, p_meta text default '')
+returns void language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null or not _can_write(me.id, p_owner, p_scope) then raise exception 'interdit'; end if;
+  insert into events(id,title,date,time,owner,scope,created_by,meta) values (p_id,p_title,p_date,coalesce(p_time,''),p_owner,p_scope,me.id,coalesce(p_meta,''))
+  on conflict (id) do update set title=excluded.title, date=excluded.date, time=excluded.time, meta=excluded.meta,
+      scope=excluded.scope, owner=excluded.owner, updated_at=now()
+    where _can_modify(me.id, events.owner, events.scope, events.created_by)
+      and (excluded.scope = 'commun' or events.scope = 'perso' or events.created_by = me.id or events.created_by is null);
+  delete from reminders_sent where event_id = p_id;
+end $$;
