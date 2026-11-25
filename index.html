@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>iwi2me</title>
+  <meta name="theme-color" content="#F6F7FB">
+  <link rel="manifest" href="manifest.webmanifest">
+  <!-- iPhone : permet l'installation sur l'écran d'accueil en plein écran -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="iwi2me">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="view"></main>
+
+  <nav class="tabbar" id="tabbar">
+    <button data-tab="cal" class="tab">
+      <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>
+      <span>Calendrier</span>
+    </button>
+    <button data-tab="tasks" class="tab">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.8 2.8L16 9.5"/></svg>
+      <span>Tâches</span>
+    </button>
+    <button data-tab="settings" class="tab">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/></svg>
+      <span>Réglages</span>
+    </button>
+  </nav>
+
+  <!-- Feuille de saisie (ajout d'événement ou de tâche) -->
+  <dialog id="sheet"><form method="dialog" id="sheetForm"></form></dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
