@@ -544,7 +544,14 @@ function readFor() {
   return v === "commun" ? { owner: me, scope: "commun" } : { owner: v, scope: "perso" };
 }
 function notifyFor(f) {
-  if (f.scope === "perso" && f.owner !== me) toast(`Ajouté au calendrier de ${prof(f.owner).name}`);
+  if (f.scope === "perso" && f.owner !== me) toast(`Ajouté au calendrier de ${(prof(f.owner) || {}).name || "l'autre"}`);
+}
+
+// Message d'erreur visible DANS la fenêtre (le toast passe derrière un <dialog>)
+function sheetErr(msg) {
+  let e = $("#sheetErr");
+  if (!e) { e = document.createElement("div"); e.id = "sheetErr"; e.className = "sheet-err"; const a = sheetForm.querySelector(".actions"); a.parentNode.insertBefore(e, a); }
+  e.textContent = msg;
 }
 
 function openEventSheet(forId) {
@@ -601,8 +608,10 @@ document.addEventListener("click", (ev) => {
       if (!title) { $("#fTitle").focus(); return; }
       const date = $("#fDate").value || ui.selected;
       const f = readFor();
-      const t1 = $("#fTime").value, t2 = $("#fTimeEnd").value;
-      if (t1 && t2 && t2 <= t1) { toast("L'heure de fin doit être après le début"); return; }
+      const t1 = $("#fTime").value; let t2 = $("#fTimeEnd").value;
+      if (t1 && t2 === "00:00") t2 = "23:59"; // minuit = fin de journée
+      if (!t1 && t2) { sheetErr("Indique aussi l'heure de début (De)."); return; }
+      if (t1 && t2 && t2 <= t1) { sheetErr("L'heure de fin doit être après l'heure de début."); return; }
       const time = t1 ? (t2 ? `${t1}-${t2}` : t1) : "";
       const ev = { id: uid(), title, date, time, ...f };
       state.events.push(ev); push("upsert_event", evArgs(ev));
