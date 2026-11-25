@@ -231,12 +231,25 @@ const hero = $("#hero");
 // ---------------------------------------------------------------
 // 4. VUES
 // ---------------------------------------------------------------
+let pinCode = "";
+const pinDots = () => pinCode ? "●".repeat(pinCode.length) : `<span class="muted">Saisis ton code</span>`;
+function pinKey(k) {
+  if (k === "del") pinCode = pinCode.slice(0, -1);
+  else if (k === "clr") pinCode = "";
+  else if (/^\d$/.test(k) && pinCode.length < 12) pinCode += k;
+  const d = document.querySelector("#lgDots"); if (d) d.innerHTML = pinDots();
+}
 function viewLogin() {
   return `<div class="login-box">
     <h1>iwi2me</h1>
     <p class="muted">Connecte-toi pour retrouver ton espace.</p>
     <div class="field"><label>E-mail</label><input id="lgMail" type="email" autocomplete="email" inputmode="email" autocapitalize="off"></div>
-    <div class="field"><label>Code</label><input id="lgPin" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="current-password"></div>
+    <div class="field"><label>Code</label>
+      <div class="pin-dots" id="lgDots" aria-live="polite">${pinDots()}</div>
+      <div class="keypad">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `<button type="button" data-act="pin-key" data-k="${n}">${n}</button>`).join("")}
+        <button type="button" class="alt" data-act="pin-key" data-k="del" aria-label="Effacer">⌫</button>
+        <button type="button" data-act="pin-key" data-k="0">0</button>
+        <button type="button" class="alt" data-act="pin-key" data-k="clr" aria-label="Tout effacer">C</button></div></div>
     <p class="muted">Indice : devine</p>
     <p class="lg-err" id="lgErr"></p>
     <button class="btn" data-act="login">Se connecter</button>
@@ -750,7 +763,12 @@ function openTaskSheet() {
 // ---------------------------------------------------------------
 // 6. ACTIONS (un seul écouteur de clics pour toute l'appli)
 // ---------------------------------------------------------------
-document.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.target.id && ["lgMail", "lgPin"].includes(ev.target.id)) document.querySelector("[data-act=login]")?.click(); });
+document.addEventListener("keydown", (ev) => {
+  if (!needLogin) return;
+  if (ev.key === "Enter") { document.querySelector("[data-act=login]")?.click(); return; }
+  if (ev.target.matches?.("input")) return; // on tape l'e-mail normalement ; le clavier physique sert au code sinon
+  if (/^\d$/.test(ev.key)) pinKey(ev.key); else if (ev.key === "Backspace") pinKey("del");
+});
 document.addEventListener("click", (ev) => {
   const el = ev.target.closest("[data-act], .tab");
   if (!el) return;
@@ -841,8 +859,9 @@ document.addEventListener("click", (ev) => {
       try { navigator.clipboard.writeText(link).then(() => toast("Adresse copiée")); } catch (e) { prompt("Copie cette adresse :", link); }
       break;
     }
+    case "pin-key": pinKey(el.dataset.k); break;
     case "login": {
-      const em = $("#lgMail").value.trim(), pin = $("#lgPin").value.trim(), err = $("#lgErr");
+      const em = $("#lgMail").value.trim(), pin = pinCode, err = $("#lgErr");
       err.textContent = "";
       if (!em || !pin) { err.textContent = "Saisis ton e-mail et ton code."; break; }
       el.disabled = true;
