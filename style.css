@@ -551,3 +551,8 @@ main { padding-top: calc(env(safe-area-inset-top) + 58px); position: relative; }
 .tab.gear.on { color: #fff; background: var(--accent); border-color: transparent; }
 .tab.gear[hidden] { display: none; }
 body.login .tab.gear { display: none !important; }
+
+/* Titres très longs sans espace : on coupe au lieu de déborder de la page */
+.row .t, .task, .task b, .chk .cl, .set-row, .inv, .usr, .alertcard .al, .cm { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+.row .t b, .row .t small, .task-title, .tl b { overflow-wrap: anywhere; }
+main { overflow-x: clip; }

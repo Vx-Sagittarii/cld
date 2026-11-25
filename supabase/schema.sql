@@ -1534,3 +1534,20 @@ begin
     delete from sport_logs where profile_id = me.id and day = p_day and kind = p_kind;
   end if;
 end $$;
+
+-- 23. rename_profile : validation du nom ; un utilisateur invité ne peut plus renommer son pseudo (définitif), seul l'admin déverrouillé peut.
+create or replace function rename_profile(p_token uuid, p_id text, p_name text) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token); nm text := trim(coalesce(p_name, '')); er text;
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  if _is_pair(p_id) then
+    if not (me.id = p_id or _adm(me)) then raise exception 'interdit'; end if;
+    if char_length(nm) < 1 or char_length(nm) > 24 then raise exception 'nom invalide'; end if;
+  else
+    if not _adm(me) then raise exception 'interdit'; end if;
+    er := _pseudo_err(nm, p_id);
+    if er is not null then raise exception '%', er; end if;
+  end if;
+  update profiles set name = nm where id = p_id;
+end $$;

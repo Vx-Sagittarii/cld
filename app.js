@@ -1195,7 +1195,7 @@ function viewSettings() {
   const lock = cloud && !isAdmin; // en ligne, seul l'admin gère les profils
   const rows = state.profiles.map((p) => `
       <div class="set-row"><i class="dot-lg" style="background:${p.color}"></i>
-        <input data-pname="${p.id}" value="${esc(p.name)}" maxlength="24" ${lock || (cloud && !isAdmin && p.id !== me) ? "disabled" : ""}>
+        <input data-pname="${p.id}" value="${esc(p.name)}" maxlength="24" ${lock || (cloud && (p.id !== me ? !(isAdmin && adminOk) : !isNS(me) && !isAdmin)) ? "disabled" : ""}>
         ${p.admin || p.id === "nelson" ? `<span class="tag-admin">admin</span>` : ""}
         ${!PAIR.includes(p.id) && (!cloud || isAdmin) ? `<button class="del" data-act="del-profile" data-id="${p.id}" aria-label="Supprimer">×</button>` : ""}
       </div>`).join("");
@@ -1211,7 +1211,7 @@ function viewSettings() {
     <div class="card">
       <h3>Profils</h3>
       ${rows}
-      ${!lock ? `<button class="add-btn" data-act="new-profile">+ Ajouter un profil</button>` : ""}
+      ${!lock && !cloud ? `<button class="add-btn" data-act="new-profile">+ Ajouter un profil</button>` : ""}
       <p class="muted">${cloud && !isAdmin && !isNS(me) ? (PAIR.length > 1 ? `Ton calendrier est privé. Tu partages le calendrier « Commun » avec ${esc(prof(PAIR.find((x) => x !== me))?.name || "ton/ta partenaire")}.` : "Ton calendrier est privé : toi seul(e) y as accès.") : "Nelson et Sophie ont chacun leur calendrier et partagent le calendrier « Commun ». Les autres profils sont de simples noms avec leur propre calendrier privé."}</p>
     </div>
     ${linkCard}
