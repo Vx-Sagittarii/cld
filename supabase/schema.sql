@@ -1506,3 +1506,12 @@ begin
 end $$;
 revoke all on function request_access(text,text,text) from public;
 grant execute on function request_access(text,text,text) to anon, authenticated;
+
+-- 20. Mot de passe admin séparé (réservé à Nelson, session de 30 min).
+-- Le mot de passe n'est PAS dans ce dépôt : il a été enregistré (haché) directement dans la table admin_secret.
+alter table profiles add column if not exists admin_until timestamptz;
+create table if not exists admin_secret (id int primary key default 1 check (id = 1), hash text not null);
+alter table admin_secret enable row level security;
+-- insert into admin_secret(id, hash) values (1, crypt('<mot de passe>', gen_salt('bf'))) on conflict (id) do update set hash = excluded.hash;
+-- _adm(me), admin_unlock(token, pass), admin_status(token), admin_lock(token) ; toutes les fonctions admin exigent maintenant _adm(me) au lieu de me.is_admin.
+-- admin_unlock : réservé à nelson, 5 erreurs = blocage 15 min (login_throttle, clé 'adm-nelson').

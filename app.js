@@ -263,7 +263,7 @@ function pinKey(k) {
   else if (/^\d$/.test(k) && pinCode.length < 12) pinCode += k;
   const d = document.querySelector("#lgDots"); if (d) d.innerHTML = pinDots();
 }
-let needPseudo = false;
+let needPseudo = false, adminOk = false;
 const REQ = (() => { try { return new URLSearchParams(location.search).has("demande"); } catch (e) { return false; } })();
 const INVITE = (() => { try { const c = new URLSearchParams(location.search).get("invite"); return /^[0-9a-f-]{36}$/i.test(c || "") ? c : null; } catch (e) { return null; } })();
 // Bandeaux de l'accueil : alertes (admin seulement) et rappel d'objectif sport (fin de semaine)
@@ -292,6 +292,14 @@ function viewSignup() {
     <button class="btn" data-act="signup">${INVITE ? "Créer mon compte" : "Envoyer ma demande"}</button>
     <p class="muted" style="margin-top:14px">Déjà un compte ? <a href="${location.pathname}">Se connecter</a></p>
   </div>`;
+}
+function viewAdminLock() {
+  return `<div class="head"><div><h1>Administration</h1><div class="sub">Accès protégé</div></div><button class="btn small" data-act="admin-close">← Réglages</button></div>
+    <div class="card"><h3>🔒 Mot de passe admin</h3>
+      <p class="muted">Saisis le mot de passe administrateur pour continuer. L'accès reste ouvert 30 minutes.</p>
+      <input id="admPass" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Mot de passe admin" style="width:100%">
+      <p class="lg-err" id="admErr"></p>
+      <div class="btn-line"><button class="btn small primary" data-act="admin-unlock">Déverrouiller</button></div></div>`;
 }
 function viewPseudo() {
   return `<div class="login-box">
@@ -336,7 +344,7 @@ function render(animate = false) {
   else if (ui.tab === "tasks") view.innerHTML = viewTasks();
   else if (ui.tab === "sport") view.innerHTML = viewSport();
   else if (ui.tab === "astro") view.innerHTML = viewAstro();
-  else view.innerHTML = ui.admin && isAdmin ? viewAdmin() : viewSettings();
+  else view.innerHTML = ui.admin && isAdmin ? (adminOk ? viewAdmin() : viewAdminLock()) : viewSettings();
   document.body.classList.toggle("viewing", viewing() && (ui.tab === "cal" || ui.tab === "tasks"));
   view.classList.toggle("enter", animate);
   if (gcal.on && gcal.token && ui.tab === "cal") ensureGcal();        // cascade d'apparition seulement au changement d'onglet
@@ -1293,8 +1301,18 @@ document.addEventListener("click", (ev) => {
       const h = el.parentNode.querySelector(".vhint"); if (h) h.textContent = pub ? (prof(PAIR[0])?.name || "") + " et " + (prof(PAIR[1])?.name || "") + " le voient" : "Visible par toi seul";
       break;
     }
-    case "admin-open": ui.admin = true; render(true); loadAdmin(); break;
-    case "admin-close": ui.admin = false; ui.newAcc = null; render(true); break;
+    case "admin-open": ui.admin = true; render(true); if (adminOk) loadAdmin(); break;
+    case "admin-close": ui.admin = false; ui.newAcc = null; adminOk = false; state.admin = null; rpc("admin_lock", { p_token: token }).catch(() => {}); render(true); break; // on referme à clé en quittant
+    case "admin-unlock": {
+      const pw = $("#admPass").value, er = $("#admErr"); er.textContent = "";
+      if (!pw) { er.textContent = "Saisis le mot de passe."; break; }
+      el.disabled = true;
+      rpc("admin_unlock", { p_token: token, p_pass: pw }).then((r) => {
+        if (r?.ok) { adminOk = true; render(true); loadAdmin(); }
+        else { er.textContent = r?.error || "Accès refusé."; el.disabled = false; $("#admPass").value = ""; }
+      }).catch(() => { er.textContent = "Connexion impossible."; el.disabled = false; });
+      break;
+    }
     case "inv-perm": ui.invPerms = ui.invPerms || { tasks: true, sport: true, astro: true, integrations: true }; ui.invPerms[el.dataset.k] = ui.invPerms[el.dataset.k] === false; render(); break;
     case "inv-create": {
       const perms = {}; PERM_DEFS.forEach(([k]) => { perms[k] = (ui.invPerms || {})[k] !== false; });
@@ -1336,7 +1354,7 @@ document.addEventListener("click", (ev) => {
       break;
     }
     case "ban-x": (ui.banDis || (ui.banDis = {}))[el.dataset.k] = true; render(); break;
-    case "admin-open-tab": ui.tab = "settings"; ui.admin = true; render(true); loadAdmin(); break;
+    case "admin-open-tab": ui.tab = "settings"; ui.admin = true; render(true); if (adminOk) loadAdmin(); break;
     case "acc-ok": case "acc-no": {
       const u = (state.admin?.users || []).find((x) => x.id === el.dataset.id); if (!u) break;
       const ok = act === "acc-ok"; if (!ok && !confirm(`Refuser la demande de ${u.name} ? Elle sera supprimée.`)) break;
@@ -1725,7 +1743,8 @@ async function pull() {
     me = d.me.id; isAdmin = !!d.me.admin; gShared = !!d.me.gcal_shared; hevyOn = !!d.me.hevy; hevySyncAt = d.me.hevy_sync || null;
     const first = !loaded;
     if (Date.now() - lastPing > 300000) { lastPing = Date.now(); rpc("ping", { p_token: token }).catch(() => {}); }
-    if (isAdmin && (first || Date.now() - lastAdm > 180000)) { lastAdm = Date.now(); loadAdmin(true); }
+    if (isAdmin) { try { const st = await rpc("admin_status", { p_token: token }); const was = adminOk; adminOk = !!st?.ok; if (was !== adminOk) { if (!adminOk) state.admin = null; if (ui.admin) render(); } } catch (e) {} } else adminOk = false;
+    if (isAdmin && adminOk && (first || Date.now() - lastAdm > 180000)) { lastAdm = Date.now(); loadAdmin(true); }
     const prevPerms = state.perms || {};
     if (snap !== lastSnap) {
       lastSnap = snap;
