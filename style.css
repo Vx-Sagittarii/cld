@@ -395,3 +395,29 @@ body.login .tabbar, body.login #fab, body.login .fab { display: none !important;
   border-color: #FFE08A;
   box-shadow: 0 6px 18px rgba(226,59,78,.55), 0 0 14px rgba(255,138,61,.45);
 }
+
+
+/* Mode consultation (lecture seule) */
+.ro-banner { margin: 0 0 12px; padding: 10px 14px; border-radius: 14px; background: rgba(66,133,244,.14); color: #A9C4FA; font-size: 13px; line-height: 1.35; }
+body.viewing .add-btn, body.viewing .del, body.viewing [data-act="new-event"], body.viewing [data-act="new-task"], body.viewing [data-act="save-prog"] { display: none !important; }
+body.viewing .task input[type=range] { pointer-events: none; opacity: .55; }
+
+/* Onglet Sport */
+.spstats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
+.spstats > div { background: var(--card, rgba(255,255,255,.06)); border: 1px solid rgba(255,255,255,.08); border-radius: 16px; padding: 12px 6px; text-align: center; }
+.spstats b { display: block; font-size: 19px; color: var(--c); line-height: 1.1; }
+.spstats span { font-size: 11px; opacity: .75; }
+.day.sp.went { background: var(--c); color: #fff; font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,.25); }
+.day.sp.went.out { opacity: .55; }
+.day.sp .cnt { position: absolute; top: 2px; right: 4px; font-size: 10px; font-weight: 700; background: rgba(0,0,0,.35); border-radius: 8px; padding: 0 4px; }
+.day.sp.sel:not(.went) { background: rgba(255,255,255,.12); }
+.day.sp.sel { outline: 2px solid #fff; outline-offset: -2px; animation: none; }
+.wkbars { display: flex; gap: 10px; align-items: flex-end; height: 130px; padding-top: 6px; }
+.wk { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; height: 100%; }
+.wkb { flex: 1; width: 100%; display: flex; align-items: flex-end; background: rgba(255,255,255,.05); border-radius: 10px; overflow: hidden; }
+.wkb i { width: 100%; min-height: 3px; background: linear-gradient(180deg, var(--c), rgba(255,255,255,.18)); border-radius: 10px 10px 0 0; }
+.wk b { font-size: 13px; } .wk span { font-size: 10px; opacity: .7; }
+.mrow { display: grid; grid-template-columns: 96px 1fr 64px; align-items: center; gap: 8px; margin: 7px 0; font-size: 13px; }
+.mbar { height: 10px; background: rgba(255,255,255,.07); border-radius: 6px; overflow: hidden; }
+.mbar i { display: block; height: 100%; background: linear-gradient(90deg, var(--c), rgba(255,255,255,.35)); border-radius: 6px; }
+.mrow em { font-style: normal; font-size: 11px; opacity: .75; text-align: right; }

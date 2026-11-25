@@ -86,10 +86,12 @@ const prof = (id) => state.profiles.find((p) => p.id === id);
 const isPair = (id) => PAIR.includes(id);
 
 // Règles de visibilité : le commun n'est vu que par Nelson et Sophie ; le reste que par son propriétaire
-const canSee = (it) => it.scope === "commun" ? isPair(me) : it.owner === me;
+// Mode consultation : je regarde le profil public de l'autre (commun + son Google partagé), en lecture seule
+const viewing = () => cloud && isPair(me) && !!ui.viewAs && ui.viewAs !== me && isPair(ui.viewAs);
+const canSee = (it) => viewing() ? (it.scope === "commun" && (!it.google || it.owner === ui.viewAs)) : (it.scope === "commun" ? isPair(me) : it.owner === me);
 // Deux volets : « Perso » = tout ce que je vois (privé + public avec l'autre) ; « Commun » = seulement le public
-const passes = (it) => canSee(it) && (!isPair(me) || ui.filter !== "commun" || it.scope === "commun");
-const persoView = () => isPair(me) && ui.filter !== "commun";
+const passes = (it) => canSee(it) && (viewing() || !isPair(me) || ui.filter !== "commun" || it.scope === "commun");
+const persoView = () => isPair(me) && !viewing() && ui.filter !== "commun";
 const colorOf = (it) => it.scope === "commun" ? (document.body.classList.contains("noel") ? "#FF5A6E" : COMMUN_COLOR) : (prof(it.owner)?.color || "#A45CFF");
 // Avancement d'une tâche : en commun, moyenne de Nelson (progress) et Sophie (progress_b)
 const pendingProg = new Map(); // % modifiés mais pas encore sauvegardés
@@ -103,6 +105,7 @@ const labelOf = (it) => (it.google && it.owner !== me) ? `${prof(it.owner)?.name
 // État de l'interface (non sauvegardé)
 const ui = {
   tab: "cal",
+  viewAs: null,
   selected: toISO(new Date()),
   month: startOfMonth(new Date()),
   period: "day",
@@ -271,8 +274,10 @@ function render(animate = false) {
   if (!loaded) { view.innerHTML = `<div class="empty">Chargement…</div>`; return; }
   if (ui.tab === "cal") view.innerHTML = viewCalendar();
   else if (ui.tab === "tasks") view.innerHTML = viewTasks();
+  else if (ui.tab === "sport") view.innerHTML = viewSport();
   else if (ui.tab === "astro") view.innerHTML = viewAstro();
   else view.innerHTML = viewSettings();
+  document.body.classList.toggle("viewing", viewing() && (ui.tab === "cal" || ui.tab === "tasks"));
   view.classList.toggle("enter", animate);
   if (gcal.on && gcal.token && ui.tab === "cal") ensureGcal();        // cascade d'apparition seulement au changement d'onglet
   hero.classList.toggle("off", ui.tab !== "cal"); // le bandeau photo n'apparaît que sur le calendrier
@@ -418,7 +423,15 @@ function profileBar() {
   const chips = state.profiles.map((p) => `<button class="pchip ${p.id === me ? "on" : ""}" style="--c:${p.color}" data-act="profile" data-id="${p.id}"><i></i>${esc(p.name)}</button>`).join("");
   return `<div class="pbar">${chips}<button class="pchip add" data-act="new-profile" aria-label="Ajouter un profil">+</button></div>`;
 }
+// Choix de la personne dont on regarde le calendrier / le sport (soi-même ou l'autre, en lecture seule)
+function viewBar() {
+  if (!cloud || !isPair(me)) return "";
+  const cur = ui.viewAs || me;
+  const chips = PAIR.map((id) => prof(id)).filter(Boolean).map((p) => `<button class="pchip ${p.id === cur ? "on" : ""}" style="--c:${p.color}" data-act="view-as" data-id="${p.id}"><i></i>${esc(p.name)}${p.id === me ? " (moi)" : ""}</button>`).join("");
+  return `<div class="pbar">${chips}</div>${viewing() ? `<div class="ro-banner">👀 Tu consultes le profil de ${esc(prof(ui.viewAs)?.name || "")} : seulement ce qui est public ou partagé, en lecture seule.</div>` : ""}`;
+}
 function filterBar() {
+  if (viewing()) return "";
   if (!isPair(me)) return "";
   const f = [["perso", "Perso"], ["commun", "Commun"]];
   return `<div class="seg two">${f.map(([k, l]) => `<button class="${k === ui.filter ? "on" : ""}" data-act="filter" data-f="${k}">${l}</button>`).join("")}</div>`;
@@ -503,13 +516,13 @@ function viewCalendar() {
 
   return `
     <div class="head">
-      <div><h1>${MOIS_LONG[m.getMonth()]} ${m.getFullYear()}</h1><div class="sub">Calendrier de ${esc(prof(me).name)}</div></div>
+      <div><h1>${MOIS_LONG[m.getMonth()]} ${m.getFullYear()}</h1><div class="sub">Calendrier de ${esc(prof(viewing() ? ui.viewAs : me).name)}</div></div>
       <div class="nav">
         <button class="icon-btn nav-btn" data-act="month" data-dir="-1" aria-label="Mois précédent" title="Mois précédent"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg></button>
         <button class="icon-btn nav-btn" data-act="month" data-dir="1" aria-label="Mois suivant" title="Mois suivant"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>
       </div>
     </div>
-    ${profileBar()}${filterBar()}
+    ${profileBar()}${viewBar()}${filterBar()}
     ${countdownCards()}
     ${dec ? adventCountdown() : ""}
     ${gcal.on && !gcal.token ? `<button class="add-btn gre" data-act="gcal-connect-silent">Reconnecter Google Agenda</button>` : ""}
@@ -562,7 +575,7 @@ async function syncHevy(manual) {
 }
 function sportCard() {
   const pair = state.profiles.filter((p) => isPair(p.id));
-  const ws = (state.workouts || []).filter((w) => w.day === ui.selected && pair.some((p) => p.id === w.owner));
+  const ws = (state.workouts || []).filter((w) => w.day === ui.selected && pair.some((p) => p.id === w.owner) && (!viewing() || w.owner === ui.viewAs));
   const wHtml = ws.length ? ws.map((w) => `
     <div class="row"><div class="bar-owner" style="background:${prof(w.owner)?.color || "#888"}"></div>
       <div class="t"><b>🏋️ ${esc(w.title)}</b><small>${esc(prof(w.owner)?.name || "")} · ${[fmtDur(w.start, w.end), w.ex.length + (w.ex.length > 1 ? " exos" : " exo"), w.sets + (w.sets > 1 ? " séries" : " série"), w.vol ? fmtVol(w.vol) : ""].filter(Boolean).join(" · ")}</small>
@@ -575,6 +588,80 @@ function sportCard() {
     if (okUrl(l.strava)) btns.push(`<a class="btn small" href="${esc(l.strava)}" target="_blank" rel="noopener">🏃 Strava · ${esc(p.name)}</a>`);
   });
   return `<div class="card"><h3>Sport</h3>${wHtml}${btns.length ? `<div class="btn-line" style="flex-wrap:wrap;margin-top:8px">${btns.join("")}</div>` : ""}</div>`;
+}
+
+// ----- Onglet Sport : séances Hevy du mois (par personne) -----
+const MUSCLE_FR = { chest: "Pectoraux", shoulders: "Épaules", biceps: "Biceps", triceps: "Triceps", forearms: "Avant-bras", abdominals: "Abdos",
+  quadriceps: "Quadriceps", hamstrings: "Ischio-jambiers", glutes: "Fessiers", calves: "Mollets", abductors: "Abducteurs", adductors: "Adducteurs",
+  lats: "Dorsaux", upper_back: "Haut du dos", lower_back: "Lombaires", traps: "Trapèzes", neck: "Nuque", cardio: "Cardio", full_body: "Corps entier", other: "Autre" };
+const wIso = (d) => typeof d === "string" ? d.slice(0, 10) : toISO(d);
+function viewSport() {
+  const who = ui.viewAs || me, p = prof(who), m = ui.month, y = m.getFullYear(), mo = m.getMonth();
+  const all = (state.workouts || []).filter((w) => w.owner === who);
+  const inM = all.filter((w) => { const d = fromISO(wIso(w.day)); return d.getFullYear() === y && d.getMonth() === mo; });
+  const days = new Map(); inM.forEach((w) => days.set(wIso(w.day), (days.get(wIso(w.day)) || 0) + 1));
+  const today = new Date(), isCur = today.getFullYear() === y && today.getMonth() === mo;
+  const dim = new Date(y, mo + 1, 0).getDate(), elapsed = isCur ? today.getDate() : dim;
+  const perWeek = inM.length ? Math.round((inM.length / (elapsed / 7)) * 10) / 10 : 0;
+  const mins = inM.reduce((s, w) => s + (w.start && w.end ? Math.max(0, Math.round((new Date(w.end) - new Date(w.start)) / 60000)) : 0), 0);
+  const vol = inM.reduce((s, w) => s + (w.vol || 0), 0);
+  // séances par semaine (lundi → dimanche) pour les semaines qui touchent le mois
+  const wk = new Map();
+  for (let d = mondayOf(new Date(y, mo, 1)); d <= new Date(y, mo, dim); d = addDays(d, 7)) wk.set(toISO(d), 0);
+  inM.forEach((w) => { const k = toISO(mondayOf(fromISO(wIso(w.day)))); if (wk.has(k)) wk.set(k, wk.get(k) + 1); });
+  const wmax = Math.max(1, ...wk.values());
+  // muscles les plus sollicités (nombre de séries par groupe musculaire principal)
+  const mus = new Map();
+  inM.forEach((w) => (w.ex || []).forEach((e) => { if (e.m) mus.set(e.m, (mus.get(e.m) || 0) + (e.s || 0)); }));
+  const mlist = [...mus.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8), mmax = Math.max(1, ...mlist.map((x) => x[1]));
+  const noMuscle = inM.length && !mlist.length;
+  // grille du mois
+  const first = mondayOf(m); let cells = "";
+  for (let i = 0; i < 42; i++) {
+    const d = addDays(first, i), iso = toISO(d);
+    if (i >= 35 && d.getMonth() !== mo) break;
+    const n = days.get(iso) || 0, inMonth = d.getMonth() === mo;
+    cells += `<button class="day sp ${!inMonth ? "out" : ""} ${n ? "went" : ""} ${iso === toISO(today) ? "today" : ""} ${iso === ui.selected ? "sel" : ""}" style="--c:${p?.color || "#A45CFF"}" data-act="pick" data-date="${iso}">${d.getDate()}${n > 1 ? `<span class="cnt">${n}</span>` : ""}</button>`;
+  }
+  const dayWs = all.filter((w) => wIso(w.day) === ui.selected);
+  const noKey = who === me && !hevyOn;
+  return `
+    <div class="head">
+      <div><h1>Sport</h1><div class="sub">${MOIS_LONG[mo]} ${y} · ${esc(p?.name || "")}</div></div>
+      <div class="nav">
+        <button class="icon-btn nav-btn" data-act="month" data-dir="-1" aria-label="Mois précédent"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg></button>
+        <button class="icon-btn nav-btn" data-act="month" data-dir="1" aria-label="Mois suivant"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>
+      </div>
+    </div>
+    ${viewBar()}
+    ${noKey ? `<div class="card"><div class="empty">Connecte Hevy dans Réglages pour voir tes séances ici.</div></div>` : ""}
+    <div class="spstats" style="--c:${p?.color || "#A45CFF"}">
+      <div><b>${inM.length}</b><span>séance${inM.length > 1 ? "s" : ""}</span></div>
+      <div><b>${String(perWeek).replace(".", ",")}</b><span>par semaine</span></div>
+      <div><b>${mins >= 60 ? Math.floor(mins / 60) + " h " + String(mins % 60).padStart(2, "0") : mins + " min"}</b><span>d'effort</span></div>
+      <div><b>${vol ? fmtVol(vol) : "–"}</b><span>soulevé</span></div>
+    </div>
+    <div class="card">
+      <h3>Jours d'entraînement</h3>
+      <div class="dow"><span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span></div>
+      <div class="grid">${cells}</div>
+    </div>
+    <div class="card">
+      <h3>Séances par semaine</h3>
+      <div class="wkbars">${[...wk.entries()].map(([k, n]) => `<div class="wk"><div class="wkb"><i style="height:${Math.round((n / wmax) * 100)}%;--c:${p?.color || "#A45CFF"}"></i></div><b>${n}</b><span>${dm(k)}</span></div>`).join("")}</div>
+    </div>
+    <div class="card">
+      <h3>Muscles les plus sollicités</h3>
+      ${mlist.length ? mlist.map(([k, n]) => `<div class="mrow"><span>${MUSCLE_FR[k] || esc(k)}</span><div class="mbar"><i style="width:${Math.round((n / mmax) * 100)}%;--c:${p?.color || "#A45CFF"}"></i></div><em>${n} séries</em></div>`).join("")
+        : `<div class="empty">${noMuscle ? "Les muscles apparaissent après « Actualiser maintenant » dans Réglages › Hevy." : "Pas encore de séance ce mois-ci."}</div>`}
+    </div>
+    <div class="card">
+      <h3>${JOURS_LONG[fromISO(ui.selected).getDay()]} ${fromISO(ui.selected).getDate()} ${MOIS_LONG[fromISO(ui.selected).getMonth()]}</h3>
+      ${dayWs.length ? dayWs.map((w) => `
+        <div class="row"><div class="bar-owner" style="background:${p?.color || "#888"}"></div>
+          <div class="t"><b>🏋️ ${esc(w.title)}</b><small>${[fmtDur(w.start, w.end), w.ex.length + (w.ex.length > 1 ? " exos" : " exo"), w.sets + (w.sets > 1 ? " séries" : " série"), w.vol ? fmtVol(w.vol) : ""].filter(Boolean).join(" · ")}</small>
+          <small>${w.ex.map((e) => esc(e.t) + " ×" + e.s).join(" · ")}</small></div></div>`).join("") : `<div class="empty">Pas de séance ce jour-là.</div>`}
+    </div>`;
 }
 function hevyCard() {
   return `<div class="card"><h3>Hevy</h3>
@@ -609,7 +696,7 @@ function viewTasks() {
         <button class="icon-btn nav-btn" data-act="shift" data-dir="1" aria-label="Période suivante" title="Suivant"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>
       </div>
     </div>
-    ${profileBar()}${filterBar()}
+    ${profileBar()}${viewBar()}${filterBar()}
     <div class="seg">${Object.keys(labels).map((p) => `<button class="${p === ui.period ? "on" : ""}" data-act="period" data-p="${p}">${labels[p]}</button>`).join("")}</div>
 
     <div class="card overall">
@@ -898,7 +985,9 @@ document.addEventListener("click", (ev) => {
   if (el.classList.contains("tab")) { ui.tab = el.dataset.tab; render(true); window.scrollTo(0, 0); return; }
 
   const act = el.dataset.act;
+  if (viewing() && ["new-event", "edit-event", "del-event", "new-task", "del-task", "save-prog", "save-event", "save-task", "profile"].includes(act)) { toast("Lecture seule : tu consultes le profil de " + (prof(ui.viewAs)?.name || "l'autre")); return; }
   switch (act) {
+    case "view-as": ui.viewAs = el.dataset.id === me ? null : el.dataset.id; render(); break;
     case "pick": ui.selected = el.dataset.date; render(); break;
     case "month": ui.month = new Date(ui.month.getFullYear(), ui.month.getMonth() + Number(el.dataset.dir), 1); render(); break;
     case "today": ui.selected = toISO(new Date()); ui.month = startOfMonth(new Date()); render(); break;

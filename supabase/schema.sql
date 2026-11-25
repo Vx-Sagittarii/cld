@@ -614,3 +614,9 @@ begin
                         where w.day >= current_date - 400 and (w.profile_id = me.id or (_is_pair(me.id) and _is_pair(w.profile_id)))), '[]'::json)
   );
 end $$;
+
+-- ============ Migration 11 : groupes musculaires des exercices Hevy (cache) + droits de la fonction hevy-sync ============
+create table if not exists exercise_muscles (template_id text primary key, muscle text not null);
+alter table exercise_muscles enable row level security;
+grant usage on schema public to service_role;
+grant select, insert, update, delete on public.profiles, public.hevy_keys, public.workouts, public.exercise_muscles to service_role;
