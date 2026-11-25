@@ -351,3 +351,74 @@ end $$;
 drop function if exists get_profile_link(uuid, text, boolean);   -- plus de lien secret à distribuer
 revoke all on function login(text, text) from public;
 grant execute on function login(text, text) to anon, authenticated;
+
+-- ============ Migration 5 : code numérique uniquement + changement de code validé par e-mail ============
+alter table profiles add column if not exists chg_hash text, add column if not exists chg_pin text,
+  add column if not exists chg_expires timestamptz, add column if not exists chg_fails int not null default 0;
+
+-- Connexion : tout ce qui n'est pas 4 à 12 chiffres est refusé
+create or replace function login(p_email text, p_pin text) returns json
+language plpgsql security definer set search_path = public, extensions as $$
+declare p profiles; em text := lower(trim(coalesce(p_email, ''))); th login_throttle; kk text; nf int;
+begin
+  if p_pin is null or p_pin !~ '^[0-9]{4,12}$' then p_pin := ''; end if;   -- non numérique : jamais accepté
+  select * into p from profiles where lower(email) = em and pin_hash is not null;
+  kk := coalesce(p.id, '*nouveau');
+  select * into th from login_throttle where k = kk;
+  if th.locked_until is not null and th.locked_until > now() then
+    return json_build_object('error', 'Trop de tentatives, réessaie dans 15 minutes.');
+  end if;
+  if p_pin <> '' and p.id is null and em like '%@%' then
+    select * into p from profiles where email is null and pin_hash is not null and pin_hash = crypt(p_pin, pin_hash) limit 1;
+    if p.id is not null then update profiles set email = em where id = p.id; end if;
+  elsif p.id is not null and (p_pin = '' or p.pin_hash <> crypt(p_pin, p.pin_hash)) then
+    p := null;
+  end if;
+  if p.id is null then
+    nf := case when th.k is null or (th.locked_until is not null and th.locked_until <= now()) then 1 else th.fails + 1 end;
+    insert into login_throttle(k, fails, locked_until) values (kk, nf, case when nf >= 5 then now() + interval '15 minutes' end)
+      on conflict (k) do update set fails = excluded.fails, locked_until = excluded.locked_until;
+    return json_build_object('error', 'E-mail ou code incorrect.');
+  end if;
+  delete from login_throttle where k = kk;
+  return json_build_object('token', p.token, 'id', p.id);
+end $$;
+
+-- Étape 1 : le nouveau code est mis en attente, un code de validation à 6 chiffres part par e-mail
+create or replace function request_pin_change(p_token uuid, p_new text) returns json
+language plpgsql security definer set search_path = public, extensions as $$
+declare p profiles := _me(p_token); code text;
+begin
+  if p_new is null or p_new !~ '^[0-9]{6,12}$' then return json_build_object('error', 'Le code doit contenir uniquement des chiffres (6 à 12).'); end if;
+  if p.email is null then return json_build_object('error', 'Aucun e-mail enregistré pour ce profil.'); end if;
+  if p.chg_expires is not null and p.chg_expires - interval '9 minutes' > now() then return json_build_object('error', 'Un code vient d''être envoyé, attends une minute.'); end if;
+  code := lpad((abs(('x' || encode(gen_random_bytes(4), 'hex'))::bit(32)::bigint) % 1000000)::text, 6, '0');
+  update profiles set chg_hash = crypt(code, gen_salt('bf')), chg_pin = crypt(p_new, gen_salt('bf')),
+    chg_expires = now() + interval '10 minutes', chg_fails = 0 where id = p.id;
+  perform net.http_post(url := 'https://smypdolihotxtdlbgqua.supabase.co/functions/v1/send-code',
+    headers := jsonb_build_object('Content-Type', 'application/json', 'x-key', '@@SECRET@@'),
+    body := jsonb_build_object('email', p.email, 'code', code));
+  return json_build_object('sent', true, 'to', regexp_replace(p.email, '^(.).*(@.*)$', '\1***\2'));
+end $$;
+
+-- Étape 2 : le code reçu par e-mail valide le changement (sinon refusé). Les autres appareils sont déconnectés.
+create or replace function confirm_pin_change(p_token uuid, p_code text) returns json
+language plpgsql security definer set search_path = public, extensions as $$
+declare p profiles := _me(p_token); nt uuid;
+begin
+  if p.chg_expires is null or p.chg_expires < now() or p.chg_hash is null then return json_build_object('error', 'Code expiré, recommence.'); end if;
+  if p.chg_fails >= 5 then
+    update profiles set chg_hash = null, chg_pin = null, chg_expires = null, chg_fails = 0 where id = p.id;
+    return json_build_object('error', 'Trop d''essais, recommence.');
+  end if;
+  if p_code is null or p_code !~ '^[0-9]{6}$' or crypt(p_code, p.chg_hash) <> p.chg_hash then
+    update profiles set chg_fails = chg_fails + 1 where id = p.id;
+    return json_build_object('error', 'Code incorrect.');
+  end if;
+  nt := gen_random_uuid();
+  update profiles set pin_hash = chg_pin, token = nt, chg_hash = null, chg_pin = null, chg_expires = null, chg_fails = 0 where id = p.id;
+  return json_build_object('token', nt);
+end $$;
+
+revoke all on function request_pin_change(uuid, text), confirm_pin_change(uuid, text) from public;
+grant execute on function request_pin_change(uuid, text), confirm_pin_change(uuid, text) to anon, authenticated;
