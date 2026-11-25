@@ -1,7 +1,7 @@
 // Service worker : met les fichiers de l'appli en cache pour qu'elle s'ouvre
 // instantanément et fonctionne hors ligne. Change CACHE à chaque mise à jour
 // pour forcer les téléphones à récupérer la nouvelle version.
-const CACHE = "iwi2me-v10";
+const CACHE = "iwi2me-v11";
 const FILES = [
   "./",
   "./index.html",
@@ -43,4 +43,19 @@ self.addEventListener("fetch", (e) => {
       })
       .catch(() => caches.match(e.request))
   );
+});
+
+// Notifications push (rappels d'événements envoyés par le serveur)
+self.addEventListener("push", (e) => {
+  let d = {}; try { d = e.data ? e.data.json() : {}; } catch (x) { d = { title: "iwi2me", body: e.data ? e.data.text() : "" }; }
+  e.waitUntil(self.registration.showNotification(d.title || "iwi2me", {
+    body: d.body || "", icon: "icons/icon-192.png", badge: "icons/icon-192.png", tag: d.tag, data: { url: d.url || "./" }
+  }));
+});
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+    for (const c of list) if ("focus" in c) return c.focus();
+    return self.clients.openWindow(e.notification.data?.url || "./");
+  }));
 });

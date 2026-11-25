@@ -230,3 +230,85 @@ revoke all on function upsert_event(uuid,text,text,date,text,text,text), delete_
   upsert_task(uuid,text,text,text,text,int,text,text), delete_task(uuid,text) from public;
 grant execute on function upsert_event(uuid,text,text,date,text,text,text), delete_event(uuid,text),
   upsert_task(uuid,text,text,text,text,int,text,text), delete_task(uuid,text) to anon, authenticated;
+-- ---------- Migration 3 : meta événements, % de Sophie, notifications ----------
+alter table events add column if not exists meta text not null default '';
+alter table tasks  add column if not exists progress_b int not null default 0 check (progress_b between 0 and 100);
+
+create table if not exists push_subs (
+  id bigserial primary key,
+  profile_id text not null references profiles(id) on delete cascade,
+  endpoint text not null unique,
+  p256dh text not null,
+  auth text not null,
+  created_at timestamptz not null default now()
+);
+create table if not exists reminders_sent (
+  event_id text not null,
+  occ_date date not null,
+  sent_at timestamptz not null default now(),
+  primary key (event_id, occ_date)
+);
+alter table push_subs enable row level security;
+alter table reminders_sent enable row level security;
+
+drop function if exists upsert_event(uuid,text,text,date,text,text,text);
+create or replace function upsert_event(p_token uuid, p_id text, p_title text, p_date date, p_time text, p_owner text, p_scope text, p_meta text default '')
+returns void language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null or not _can_write(me.id, p_owner, p_scope) then raise exception 'interdit'; end if;
+  insert into events(id,title,date,time,owner,scope,created_by,meta) values (p_id,p_title,p_date,coalesce(p_time,''),p_owner,p_scope,me.id,coalesce(p_meta,''))
+  on conflict (id) do update set title=excluded.title, date=excluded.date, time=excluded.time, meta=excluded.meta, updated_at=now()
+    where _can_modify(me.id, events.owner, events.scope, events.created_by);
+  delete from reminders_sent where event_id = p_id;
+end $$;
+
+drop function if exists upsert_task(uuid,text,text,text,text,int,text,text);
+create or replace function upsert_task(p_token uuid, p_id text, p_title text, p_period text, p_key text, p_progress int, p_owner text, p_scope text, p_progress_b int default 0)
+returns void language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null or not _can_write(me.id, p_owner, p_scope) then raise exception 'interdit'; end if;
+  insert into tasks(id,title,period,key,progress,progress_b,owner,scope,created_by) values (p_id,p_title,p_period,p_key,p_progress,coalesce(p_progress_b,0),p_owner,p_scope,me.id)
+  on conflict (id) do update set title=excluded.title, progress=excluded.progress, progress_b=excluded.progress_b, updated_at=now()
+    where _can_modify(me.id, tasks.owner, tasks.scope, tasks.created_by);
+end $$;
+
+create or replace function get_data(p_token uuid) returns json
+language plpgsql stable security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  return json_build_object(
+    'me', json_build_object('id', me.id, 'name', me.name, 'admin', me.is_admin),
+    'profiles', coalesce((select json_agg(json_build_object('id',id,'name',name,'color',color,'admin',is_admin) order by created_at)
+                          from profiles
+                          where me.is_admin or id = me.id or (_is_pair(me.id) and _is_pair(id))), '[]'::json),
+    'events', coalesce((select json_agg(json_build_object('id',id,'title',title,'date',date,'time',time,'owner',owner,'scope',scope,'meta',meta))
+                        from events where owner = me.id or (scope = 'commun' and _is_pair(me.id))), '[]'::json),
+    'tasks',  coalesce((select json_agg(json_build_object('id',id,'title',title,'period',period,'key',key,'progress',progress,'progress_b',progress_b,'owner',owner,'scope',scope))
+                        from tasks  where owner = me.id or (scope = 'commun' and _is_pair(me.id))), '[]'::json)
+  );
+end $$;
+
+create or replace function save_sub(p_token uuid, p_endpoint text, p_p256dh text, p_auth text) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  insert into push_subs(profile_id,endpoint,p256dh,auth) values (me.id,p_endpoint,p_p256dh,p_auth)
+  on conflict (endpoint) do update set profile_id = me.id, p256dh = excluded.p256dh, auth = excluded.auth;
+end $$;
+
+create or replace function delete_sub(p_token uuid, p_endpoint text) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  delete from push_subs where endpoint = p_endpoint and profile_id = me.id;
+end $$;
+
+revoke all on function upsert_event(uuid,text,text,date,text,text,text,text), upsert_task(uuid,text,text,text,text,int,text,text,int),
+  get_data(uuid), save_sub(uuid,text,text,text), delete_sub(uuid,text) from public;
+grant execute on function upsert_event(uuid,text,text,date,text,text,text,text), upsert_task(uuid,text,text,text,text,int,text,text,int),
+  get_data(uuid), save_sub(uuid,text,text,text), delete_sub(uuid,text) to anon, authenticated;

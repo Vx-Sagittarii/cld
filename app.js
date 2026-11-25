@@ -62,8 +62,8 @@ function push(fn, args) {
   if (!cloud) return;
   rpc(fn, Object.assign({ p_token: token }, args)).catch((e) => { console.warn(fn, e); toast("Hors connexion : modification non enregistrée"); });
 }
-const evArgs = (e) => ({ p_id: e.id, p_title: e.title, p_date: e.date, p_time: e.time || "", p_owner: e.owner, p_scope: e.scope });
-const tkArgs = (t) => ({ p_id: t.id, p_title: t.title, p_period: t.period, p_key: t.key, p_progress: t.progress, p_owner: t.owner, p_scope: t.scope });
+const evArgs = (e) => ({ p_id: e.id, p_title: e.title, p_date: e.date, p_time: e.time || "", p_owner: e.owner, p_scope: e.scope, p_meta: e.meta || "" });
+const tkArgs = (t) => ({ p_id: t.id, p_title: t.title, p_period: t.period, p_key: t.key, p_progress: t.progress, p_progress_b: t.progress_b || 0, p_owner: t.owner, p_scope: t.scope });
 
 function load() {
   try {
@@ -93,7 +93,9 @@ const isPair = (id) => PAIR.includes(id);
 // Règles de visibilité : le commun n'est vu que par Nelson et Sophie ; le reste que par son propriétaire
 const canSee = (it) => it.scope === "commun" ? isPair(me) : it.owner === me;
 const passes = (it) => canSee(it) && (ui.filter === "all" || (ui.filter === "commun") === (it.scope === "commun"));
-const colorOf = (it) => it.scope === "commun" ? COMMUN_COLOR : (prof(it.owner)?.color || "#A45CFF");
+const colorOf = (it) => it.scope === "commun" ? (document.body.classList.contains("noel") ? "#FF5A6E" : COMMUN_COLOR) : (prof(it.owner)?.color || "#A45CFF");
+// Avancement d'une tâche : en commun, moyenne de Nelson (progress) et Sophie (progress_b)
+const tp = (t) => t.scope === "commun" ? Math.round((t.progress + (t.progress_b || 0)) / 2) : t.progress;
 const labelOf = (it) => it.scope === "commun" ? "Commun" : (prof(it.owner)?.name || "?");
 
 // État de l'interface (non sauvegardé)
@@ -163,7 +165,40 @@ const hhmm = (min) => `${pad(Math.floor(min / 60))}:${pad(min % 60)}`;
 const dm = (iso) => { const d = fromISO(iso); return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}`; };
 // Dernier jour d'un événement (= son jour de début s'il tient sur une journée)
 function endDateOf(e) { const p = parseTime(e.time); return p && p.endDate && p.endDate > e.date ? p.endDate : e.date; }
-const onDay = (e, iso) => iso >= e.date && iso <= endDateOf(e);
+// Options d'un événement (répétition, rappel, compte à rebours) : petit JSON dans e.meta
+const _mc = new WeakMap();
+function metaOf(e) {
+  const k = e.meta || ""; const c = _mc.get(e); if (c && c.k === k) return c.m;
+  let m = {}; try { m = k ? JSON.parse(k) : {}; } catch (x) {}
+  _mc.set(e, { k, m }); return m;
+}
+const daysBetween = (a, b) => Math.round((fromISO(b) - fromISO(a)) / 864e5);
+// Une occurrence de l'événement COMMENCE-t-elle ce jour-là ? (gère la répétition)
+function repMatch(e, iso) {
+  if (iso < e.date) return false;
+  const r = metaOf(e).rep; if (!r) return iso === e.date;
+  const a = fromISO(e.date), b = fromISO(iso);
+  if (r === "d") return true;
+  if (r === "w") return daysBetween(e.date, iso) % 7 === 0;
+  if (r === "m") return a.getDate() === b.getDate();
+  if (r === "y") return a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  return false;
+}
+// L'événement (ou une de ses répétitions) tombe-t-il sur ce jour ? Renvoie l'occurrence (copie décalée) ou null.
+function inst(e, iso) {
+  const sp = daysBetween(e.date, endDateOf(e));
+  for (let k = 0; k <= sp; k++) {
+    const o = toISO(addDays(fromISO(iso), -k));
+    if (!repMatch(e, o)) continue;
+    if (o === e.date) return e;
+    const sh = daysBetween(e.date, o), p = parseTime(e.time);
+    const time = p && p.endDate ? e.time.replace(/>.*$/, ">" + toISO(addDays(fromISO(p.endDate), sh))) : e.time;
+    return Object.assign({}, e, { date: o, time });
+  }
+  return null;
+}
+const onDay = (e, iso) => !!inst(e, iso);
+const REP_LABEL = { d: "Tous les jours", w: "Toutes les semaines", m: "Tous les mois", y: "Tous les ans" };
 // Partie de l'événement qui tombe sur le jour `iso` : {s,e} en minutes, ou null = toute la journée
 function segFor(e, iso) {
   const p = parseTime(e.time), end = endDateOf(e);
@@ -295,6 +330,7 @@ const NOEL_IMG = "img/scene-noel.svg", BASE_IMG = "img/scene.svg";
 function applySeason() {
   const dec = isDec();
   document.body.classList.toggle("noel", dec);
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", dec ? "#0B2118" : "#130A33");
   document.querySelectorAll("#heroMedia img, #photo img").forEach((i) => {
     const want = dec ? NOEL_IMG : BASE_IMG;
     if (i.getAttribute("src") !== want) i.setAttribute("src", want);
@@ -383,6 +419,17 @@ function dayStrip(evs) {
   return `<div class="card"><h3>La journée en un coup d'œil</h3>${html}</div>`;
 }
 
+// ----- Compte à rebours (événements marqués « afficher en compte à rebours ») -----
+function countdownCards() {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const items = state.events.filter((e) => metaOf(e).cd && canSee(e)).map((e) => {
+    for (let i = 0; i <= 400; i++) { const iso = toISO(addDays(today, i)); if (repMatch(e, iso)) return { e, iso, i }; }
+    return null;
+  }).filter(Boolean).sort((a, b) => a.i - b.i).slice(0, 3);
+  if (!items.length) return "";
+  return `<div class="cd-row">${items.map((x) => `<div class="cd" style="--c:${colorOf(x.e)}"><b>${x.i === 0 ? "Aujourd'hui" : x.i === 1 ? "Demain" : "J-" + x.i}</b><span>${esc(x.e.title)}</span><small>${dm(x.iso)}</small></div>`).join("")}</div>`;
+}
+
 // ----- Calendrier -----
 function viewCalendar() {
   const m = ui.month, today = toISO(new Date());
@@ -407,7 +454,7 @@ function viewCalendar() {
   }
 
   const sel = fromISO(ui.selected);
-  const evs = EV.filter((e) => onDay(e, ui.selected) && passes(e)).sort((a, b) => (segFor(a, ui.selected)?.s ?? -1) - (segFor(b, ui.selected)?.s ?? -1));
+  const evs = EV.map((e) => inst(e, ui.selected)).filter((e) => e && passes(e)).sort((a, b) => (segFor(a, ui.selected)?.s ?? -1) - (segFor(b, ui.selected)?.s ?? -1));
   const tks = state.tasks.filter((t) => t.period === "day" && t.key === ui.selected && passes(t));
 
   return `
@@ -420,6 +467,7 @@ function viewCalendar() {
       </div>
     </div>
     ${profileBar()}${filterBar()}
+    ${countdownCards()}
     ${dec ? adventCountdown() : ""}
     ${gcal.on && !gcal.token ? `<button class="add-btn gre" data-act="gcal-connect-silent">Reconnecter Google Agenda</button>` : ""}
     <div class="card ${dec ? "advent-grid" : ""}">
@@ -433,7 +481,7 @@ function viewCalendar() {
       ${evs.length ? evs.map((e) => `
         <div class="row">
           <div class="bar-owner" style="background:${colorOf(e)}"></div>
-          <div class="t"><b>${esc(e.title)}</b><small>${esc(labelOf(e))}${endDateOf(e) > e.date ? " · " + esc(fmtWhen(e)) : ""}</small></div>
+          <div class="t" ${e.google ? "" : `data-act="edit-event" data-id="${e.id}"`}><b>${esc(e.title)}</b><small>${esc(labelOf(e))}${metaOf(e).rep ? " · ↻ " + REP_LABEL[metaOf(e).rep].toLowerCase() : ""}${metaOf(e).rem !== undefined ? " · 🔔" : ""}${endDateOf(e) > e.date ? " · " + esc(fmtWhen(e)) : ""}</small></div>
           <div class="time">${endDateOf(e) > e.date ? `Jour ${Math.round((fromISO(ui.selected) - fromISO(e.date)) / 864e5) + 1}/${Math.round((fromISO(endDateOf(e)) - fromISO(e.date)) / 864e5) + 1}` : fmtWhen(e) || "Journée"}</div>
           ${e.google ? `<span class="gtag" title="Google Agenda">G</span>` : `<button class="del" data-act="del-event" data-id="${e.id}" aria-label="Supprimer">×</button>`}
         </div>`).join("") : `<div class="empty">Rien de prévu ce jour-là.</div>`}
@@ -444,7 +492,7 @@ function viewCalendar() {
       <div class="row">
         <div class="bar-owner" style="background:${colorOf(t)}"></div>
         <div class="t"><b>${esc(t.title)}</b><small>${esc(labelOf(t))}</small></div>
-        <div class="time">${t.progress}%</div>
+        <div class="time">${t.scope === "commun" ? `${prof("nelson")?.name[0] || "N"} ${t.progress}% · ${prof("sophie")?.name[0] || "S"} ${t.progress_b || 0}%` : t.progress + "%"}</div>
       </div>`).join("")}</div>` : ""}
 
     <div class="card">
@@ -461,7 +509,7 @@ function viewTasks() {
   const ref = fromISO(ui.selected);
   const key = periodKey(ui.period, ref);
   const list = state.tasks.filter((t) => t.period === ui.period && t.key === key && passes(t));
-  const avg = list.length ? Math.round(list.reduce((s, t) => s + t.progress, 0) / list.length) : 0;
+  const avg = list.length ? Math.round(list.reduce((s, t) => s + tp(t), 0) / list.length) : 0;
   const labels = { day: "Jour", week: "Semaine", month: "Mois", year: "Année" };
 
   return `
@@ -482,19 +530,56 @@ function viewTasks() {
     </div>
 
     <div class="card">
-      ${list.map((t) => `
-        <div class="task ${t.progress >= 100 ? "done" : ""}" data-id="${t.id}">
+      ${list.map((t) => {
+        const two = t.scope === "commun";
+        const sl = (val, who, c) => `<input type="range" min="0" max="100" step="5" value="${val}" data-act="slide" data-id="${t.id}" data-who="${who}" style="--v:${val};--c:${c}">`;
+        return `
+        <div class="task ${tp(t) >= 100 ? "done" : ""}" data-id="${t.id}">
           <div class="task-top">
             <i class="chip" style="background:${colorOf(t)}"></i>
             <b>${esc(t.title)}</b>
-            <span class="pct">${t.progress}%</span>
+            ${two ? "" : `<span class="pct" data-w="a">${t.progress}%</span>`}
             <button class="del" data-act="del-task" data-id="${t.id}" aria-label="Supprimer">×</button>
           </div>
-          <input type="range" min="0" max="100" step="5" value="${t.progress}" data-act="slide" data-id="${t.id}"
-                 style="--v:${t.progress};--c:${colorOf(t)}">
-        </div>`).join("") || `<div class="empty">Ajoute une première tâche.</div>`}
+          ${two ? [["nelson", "a", t.progress], ["sophie", "b", t.progress_b || 0]].map(([id, w, v]) => `
+            <div class="who"><span style="color:${prof(id)?.color}">${esc(prof(id)?.name || id)}</span><span class="pct" data-w="${w}">${v}%</span></div>${sl(v, w === "b" ? "b" : "a", prof(id)?.color)}`).join("")
+            : sl(t.progress, "a", colorOf(t))}
+        </div>`; }).join("") || `<div class="empty">Ajoute une première tâche.</div>`}
       <button class="add-btn" data-act="new-task">+ Ajouter une tâche</button>
     </div>`;
+}
+
+// ----- Rappels par notification (Web Push) -----
+const PUSH_KEY = "iwi2me-push";
+const pushSupported = () => cloud && CFG.vapidPublicKey && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+const b64u = (s) => { const r = atob((s + "=".repeat((4 - s.length % 4) % 4)).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from(r, (c) => c.charCodeAt(0)); };
+function pushCard() {
+  if (!cloud) return "";
+  if (!pushSupported()) return `<div class="card"><h3>Rappels</h3><p class="muted">Les notifications ne sont pas disponibles ici. Sur iPhone : ouvre le site dans Safari, « Partager » puis « Sur l'écran d'accueil », et lance l'appli depuis l'icône.</p></div>`;
+  const on = Notification.permission === "granted" && localStorage.getItem(PUSH_KEY) === "1";
+  return `<div class="card"><h3>Rappels 🔔</h3>
+    <p class="muted">${on ? "Les rappels sont activés sur ce téléphone : tu seras prévenu avant tes événements (quand tu as choisi un rappel)." : "Reçois une notification avant tes événements. À activer sur chaque téléphone."}</p>
+    <div class="btn-line">${on ? `<button class="btn small danger" data-act="push-off">Désactiver les rappels</button>` : `<button class="btn small" data-act="push-on">Activer les rappels</button>`}</div></div>`;
+}
+async function pushOn() {
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted") { toast("Notifications refusées dans le navigateur"); return; }
+    const reg = await navigator.serviceWorker.ready;
+    const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u(CFG.vapidPublicKey) });
+    const j = sub.toJSON();
+    await rpc("save_sub", { p_token: token, p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth });
+    localStorage.setItem(PUSH_KEY, "1");
+    reg.showNotification("iwi2me", { body: "Rappels activés ✓", icon: "icons/icon-192.png" });
+    render();
+  } catch (e) { console.warn(e); toast("Impossible d'activer les rappels"); }
+}
+async function pushOff() {
+  try {
+    const reg = await navigator.serviceWorker.ready, sub = await reg.pushManager.getSubscription();
+    if (sub) { try { await rpc("delete_sub", { p_token: token, p_endpoint: sub.endpoint }); } catch (e) {} await sub.unsubscribe(); }
+  } catch (e) {}
+  localStorage.removeItem(PUSH_KEY); render();
 }
 
 // ----- Réglages -----
@@ -535,6 +620,7 @@ function viewSettings() {
         ? `<button class="btn small danger" data-act="gcal-disconnect">Déconnecter Google Agenda</button>`
         : `<button class="btn small" data-act="gcal-connect">Connecter mon Google Agenda</button>`}</div>` : ""}
     </div>
+    ${pushCard()}
     <div class="card">
       <h3>Sauvegarde</h3>
       <p class="muted">${cloud ? "Tes données sont enregistrées en ligne. Tu peux aussi en garder une copie." : "Les données restent sur ce téléphone. Exporte-les pour les garder en sécurité ou les transférer."}</p>
@@ -580,21 +666,31 @@ function sheetErr(msg) {
   e.textContent = msg;
 }
 
-function openEventSheet(forId) {
+function openEventSheet(forId, edit) {
+  const p = edit ? parseTime(edit.time) : null, m = edit ? metaOf(edit) : {};
+  const v = { title: edit ? edit.title : "", date: edit ? edit.date : ui.selected, end: p && p.endDate ? p.endDate : "",
+    t1: p && p.s !== null ? hhmm(p.s) : "", t2: p && p.e !== null ? hhmm(p.e) : "" };
+  const opt = (val, label, cur) => `<option value="${val}" ${String(cur ?? "") === String(val) ? "selected" : ""}>${label}</option>`;
+  sheetForm.dataset.edit = edit ? edit.id : "";
   sheetForm.innerHTML = `<div class="sheet">
-    <h2>Nouvel événement</h2>
-    <div class="field"><label>Titre</label><input type="text" id="fTitle" placeholder="Dîner chez les parents" autocomplete="off"></div>
+    <h2>${edit ? "Modifier l'événement" : "Nouvel événement"}</h2>
+    <div class="field"><label>Titre</label><input type="text" id="fTitle" value="${esc(v.title)}" placeholder="Dîner chez les parents" autocomplete="off"></div>
     <div class="two">
-      <div class="field"><label>Date</label><input type="date" id="fDate" value="${ui.selected}"></div>
-      <div class="field"><label>Jusqu'au (facultatif)</label><input type="date" id="fEnd" min="${ui.selected}"></div>
+      <div class="field"><label>Date</label><input type="date" id="fDate" value="${v.date}"></div>
+      <div class="field"><label>Jusqu'au (facultatif)</label><input type="date" id="fEnd" value="${v.end}" min="${v.date}"></div>
     </div>
     <div class="two">
-      <div class="field"><label>De</label><input type="time" id="fTime"></div>
-      <div class="field"><label>À (facultatif)</label><input type="time" id="fTimeEnd"></div>
+      <div class="field"><label>De</label><input type="time" id="fTime" value="${v.t1}"></div>
+      <div class="field"><label>À (facultatif)</label><input type="time" id="fTimeEnd" value="${v.t2}"></div>
     </div>
     <div class="span-hint" id="spanHint"></div>
-    ${scopeField(forId)}
-    <div class="actions"><button type="button" class="btn" data-act="close">Annuler</button><button type="button" class="btn primary" data-act="save-event">Ajouter</button></div>
+    ${edit ? "" : scopeField(forId)}
+    <div class="two">
+      <div class="field"><label>Répéter</label><select id="fRep">${opt("", "Jamais", m.rep)}${Object.keys(REP_LABEL).map((k) => opt(k, REP_LABEL[k], m.rep)).join("")}</select></div>
+      <div class="field"><label>Rappel 🔔</label><select id="fRem">${opt("", "Aucun", m.rem)}${opt(0, "À l'heure", m.rem)}${opt(10, "10 min avant", m.rem)}${opt(60, "1 h avant", m.rem)}${opt(1440, "1 jour avant", m.rem)}</select></div>
+    </div>
+    <label class="check"><input type="checkbox" id="fCd" ${m.cd ? "checked" : ""}><span>Afficher en compte à rebours sur l'accueil</span></label>
+    <div class="actions"><button type="button" class="btn" data-act="close">Annuler</button><button type="button" class="btn primary" data-act="save-event">${edit ? "Enregistrer" : "Ajouter"}</button></div>
   </div>`;
   sheet.showModal();
   const upd = () => {
@@ -602,12 +698,13 @@ function openEventSheet(forId) {
     $("#fEnd").min = date;
     const r = computeSpan(date, $("#fEnd").value, $("#fTime").value, $("#fTimeEnd").value), h = $("#spanHint");
     const er = $("#sheetErr"); if (er) er.remove();
-    if (r.err) h.textContent = "";
-    else if (r.endDate) { const n = Math.round((fromISO(r.endDate) - fromISO(date)) / 864e5); h.textContent = n === 1 && !$("#fEnd").value ? `La fin compte pour le lendemain (${dm(r.endDate)}).` : `Sur ${n + 1} jours : du ${dm(date)} au ${dm(r.endDate)}.`; }
-    else h.textContent = "";
+    if (r.err || !r.endDate) h.textContent = "";
+    else { const n = daysBetween(date, r.endDate); h.textContent = n === 1 && !$("#fEnd").value ? `La fin compte pour le lendemain (${dm(r.endDate)}).` : `Sur ${n + 1} jours : du ${dm(date)} au ${dm(r.endDate)}.`; }
   };
   ["fDate", "fEnd", "fTime", "fTimeEnd"].forEach((i) => $("#" + i).addEventListener("input", upd));
-  setTimeout(() => $("#fTitle").focus(), 50);
+  $("#fRem").addEventListener("change", () => { if ($("#fRem").value !== "" && cloud && !(Notification?.permission === "granted" && localStorage.getItem(PUSH_KEY) === "1")) toast("Active les rappels dans Réglages pour être notifié"); });
+  upd();
+  if (!edit) setTimeout(() => $("#fTitle").focus(), 50);
 }
 
 function openTaskSheet() {
@@ -643,16 +740,25 @@ document.addEventListener("click", (ev) => {
     case "new-event": openEventSheet(); break;
     case "new-task": openTaskSheet(); break;
     case "close": sheet.close(); break;
+    case "edit-event": { const o = state.events.find((x) => x.id === el.dataset.id); if (o) openEventSheet(null, o); break; }
     case "save-event": {
       const title = $("#fTitle").value.trim();
       if (!title) { $("#fTitle").focus(); return; }
       const date = $("#fDate").value || ui.selected;
-      const f = readFor();
       const t1 = $("#fTime").value, t2 = $("#fTimeEnd").value;
       const span = computeSpan(date, $("#fEnd").value, t1, t2);
       if (span.err) { sheetErr(span.err); return; }
       const time = (t1 ? (t2 ? `${t1}-${t2}` : t1) : "") + (span.endDate ? `>${span.endDate}` : "");
-      const ev = { id: uid(), title, date, time, ...f };
+      const mo = {}; if ($("#fRep").value) mo.rep = $("#fRep").value; if ($("#fRem").value !== "") mo.rem = Number($("#fRem").value); if ($("#fCd").checked) mo.cd = 1;
+      const meta = Object.keys(mo).length ? JSON.stringify(mo) : "";
+      const editId = sheetForm.dataset.edit;
+      if (editId) {
+        const o = state.events.find((x) => x.id === editId);
+        if (o) { Object.assign(o, { title, date, time, meta }); push("upsert_event", evArgs(o)); }
+        save(); sheet.close(); ui.selected = date; ui.month = startOfMonth(fromISO(date)); render(); toast("Événement modifié"); break;
+      }
+      const f = readFor();
+      const ev = { id: uid(), title, date, time, meta, ...f };
       state.events.push(ev); push("upsert_event", evArgs(ev));
       save(); sheet.close(); ui.selected = date; ui.month = startOfMonth(fromISO(date)); render(); notifyFor(f); adventBurst(date); break;
     }
@@ -661,12 +767,14 @@ document.addEventListener("click", (ev) => {
       if (!title) { $("#fTitle").focus(); return; }
       const period = $("#fPeriod").value;
       const f = readFor();
-      const tk = { id: uid(), title, period, key: periodKey(period, fromISO(ui.selected)), ...f, progress: 0 };
+      const tk = { id: uid(), title, period, key: periodKey(period, fromISO(ui.selected)), ...f, progress: 0, progress_b: 0 };
       state.tasks.push(tk); push("upsert_task", tkArgs(tk));
       save(); sheet.close(); ui.period = period; render(); notifyFor(f); break;
     }
     case "del-event": state.events = state.events.filter((e) => e.id !== el.dataset.id); push("delete_event", { p_id: el.dataset.id }); save(); render(); break;
     case "del-task": state.tasks = state.tasks.filter((t) => t.id !== el.dataset.id); push("delete_task", { p_id: el.dataset.id }); save(); render(); break;
+    case "push-on": pushOn(); break;
+    case "push-off": pushOff(); break;
     case "gcal-connect": connectGoogle(false); break;
     case "gcal-connect-silent": connectGoogle(true); break;
     case "gcal-disconnect": disconnectGoogle(); break;
@@ -726,15 +834,16 @@ document.addEventListener("input", (ev) => {
   if (el.dataset.act === "slide") {
     const t = state.tasks.find((x) => x.id === el.dataset.id);
     if (!t) return;
-    t.progress = Number(el.value);
-    el.style.setProperty("--v", t.progress);
+    const val = Number(el.value), w = el.dataset.who === "b" ? "b" : "a";
+    if (w === "b") t.progress_b = val; else t.progress = val;
+    el.style.setProperty("--v", val);
     const card = el.closest(".task");
-    card.querySelector(".pct").textContent = t.progress + "%";
-    card.classList.toggle("done", t.progress >= 100);
+    const pc = card.querySelector(`.pct[data-w="${w}"]`); if (pc) pc.textContent = val + "%";
+    card.classList.toggle("done", tp(t) >= 100);
     // Recalcule le cercle global
     const key = periodKey(ui.period, fromISO(ui.selected));
     const list = state.tasks.filter((x) => x.period === ui.period && x.key === key && passes(x));
-    const avg = Math.round(list.reduce((s, x) => s + x.progress, 0) / list.length);
+    const avg = Math.round(list.reduce((s, x) => s + tp(x), 0) / list.length);
     $("#ring").style.setProperty("--p", avg);
     $("#ringTxt").textContent = avg + "%";
   }

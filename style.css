@@ -269,10 +269,17 @@ button.chip-glass.zoom { border: 0; cursor: pointer; }
 .add-btn.gre { background: rgba(66,133,244,.16); color: #8AB4F8; margin: 0 0 12px; }
 
 /* ---------- Mode Noël : calendrier de l'avent ---------- */
-body.noel { --accent: #E23B4E; }
+body.noel { --bg: #0B2118; --card: #143528; --text: #FFF3E2; --muted: #9FC3AE; --line: rgba(255,255,255,.1);
+  --accent: #E23B4E; --orange: #F5C451; --accent-soft: rgba(226,59,78,.2); --shadow: 0 8px 28px rgba(0,0,0,.4); }
 body.noel { background:
-    radial-gradient(560px 380px at 110% 105%, rgba(61,220,151,.16), transparent 70%),
-    radial-gradient(560px 380px at -10% -5%, rgba(226,59,78,.22), transparent 70%), var(--bg); background-attachment: fixed; }
+    radial-gradient(560px 380px at 110% 105%, rgba(245,196,81,.14), transparent 70%),
+    radial-gradient(560px 380px at -10% -5%, rgba(226,59,78,.26), transparent 70%), var(--bg); background-attachment: fixed; }
+body.noel .tabbar { background: rgba(11,33,24,.92); }
+body.noel .seg button.on { background: #1F5A42; }
+body.noel .field input, body.noel .field select, body.noel .set-row input { background: #0F2A20; }
+body.noel .field input:focus, body.noel .field select:focus { background: #16392B; }
+body.noel .btn.primary, body.noel .day.sel { box-shadow: 0 6px 16px rgba(226,59,78,.4); }
+body.noel .tab.on { color: #FFB3BC; }
 .advent .count { font-size: 17px; }
 .advent .count b { color: #FFE08A; font-size: 21px; }
 .advent-grid .day.door { border: 1.5px solid rgba(255,224,138,.35); background: rgba(226,59,78,.14); color: #FFE9B8; font-weight: 700; }
@@ -314,3 +321,15 @@ body.noel { background:
 .sheet-err{background:rgba(226,59,78,.18);border:1px solid #E23B4E;color:#FFD6DA;padding:10px 12px;border-radius:12px;margin:4px 0 10px;font-size:14px}
 
 .span-hint{color:var(--muted);font-size:13px;min-height:18px;margin:-4px 2px 8px}
+
+/* ---------- Compte à rebours, cases, tâches communes ---------- */
+.cd-row { display: flex; gap: 10px; margin-bottom: 14px; overflow-x: auto; }
+.cd { flex: 1 1 0; min-width: 120px; background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--c); border-radius: 16px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.cd b { font-size: 22px; letter-spacing: -.02em; color: var(--c); }
+.cd span { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cd small { color: var(--muted); font-size: 12px; }
+.check { display: flex; align-items: center; gap: 10px; margin: 2px 0 12px; font-size: 14px; color: var(--text); }
+.check input { width: 20px; height: 20px; accent-color: var(--accent); flex: none; }
+.who { display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; margin: 8px 0 4px; }
+.who .pct { color: var(--muted); }
+.row .t[data-act="edit-event"] { cursor: pointer; }
