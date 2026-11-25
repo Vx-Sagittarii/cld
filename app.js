@@ -653,10 +653,10 @@ const visField = () => isPair(me)
     </select></div>`
   : "";
 const scopeField = (forId) => isPair(me)
-  ? `<div class="field"><label>Pour</label><select id="fScope">
-      <option value="nelson" ${(forId || (ui.filter === "commun" ? "commun" : me)) === "nelson" ? "selected" : ""}>${esc(prof("nelson").name)}</option>
-      <option value="sophie" ${(forId || (ui.filter === "commun" ? "commun" : me)) === "sophie" ? "selected" : ""}>${esc(prof("sophie").name)}</option>
-      <option value="commun" ${!forId && ui.filter === "commun" ? "selected" : ""}>Commun (${esc(prof("nelson").name)} + ${esc(prof("sophie").name)})</option>
+  ? `<div class="field"><label>Visibilité</label><select id="fScope">
+      <option value="commun" ${!forId ? "selected" : ""}>Public (${esc(prof("nelson").name)} + ${esc(prof("sophie").name)})</option>
+      <option value="nelson" ${forId === "nelson" ? "selected" : ""}>Privé · ${esc(prof("nelson").name)}</option>
+      <option value="sophie" ${forId === "sophie" ? "selected" : ""}>Privé · ${esc(prof("sophie").name)}</option>
     </select></div>`
   : "";
 // Renvoie { owner, scope } selon le choix du champ « Pour »
