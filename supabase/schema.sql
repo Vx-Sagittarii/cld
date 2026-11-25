@@ -175,3 +175,58 @@ grant execute on function bootstrap_admin(), get_data(uuid),
   upsert_task(uuid,text,text,text,text,int,text,text), delete_task(uuid,text),
   create_profile(uuid,text,text,text), rename_profile(uuid,text,text), delete_profile(uuid,text),
   get_profile_link(uuid,text,boolean) to anon, authenticated;
+
+-- ---------- Migration 2 : qui peut modifier quoi ----------
+alter table events add column if not exists created_by text;
+alter table tasks  add column if not exists created_by text;
+update events set created_by = owner where created_by is null;
+update tasks  set created_by = owner where created_by is null;
+
+-- Créer pour l'autre est permis ; modifier/supprimer seulement ce qui est à soi ou qu'on a créé soi-même.
+create or replace function _can_modify(p_me text, p_owner text, p_scope text, p_created_by text) returns boolean
+language sql immutable as $$
+  select case when p_scope = 'commun' then _is_pair(p_me)
+              else p_me = p_owner or p_me = coalesce(p_created_by, p_owner) end;
+$$;
+
+create or replace function upsert_event(p_token uuid, p_id text, p_title text, p_date date, p_time text, p_owner text, p_scope text)
+returns void language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null or not _can_write(me.id, p_owner, p_scope) then raise exception 'interdit'; end if;
+  insert into events(id,title,date,time,owner,scope,created_by) values (p_id,p_title,p_date,coalesce(p_time,''),p_owner,p_scope,me.id)
+  on conflict (id) do update set title=excluded.title, date=excluded.date, time=excluded.time, updated_at=now()
+    where _can_modify(me.id, events.owner, events.scope, events.created_by);
+end $$;
+
+create or replace function delete_event(p_token uuid, p_id text) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  delete from events where id = p_id and _can_modify(me.id, owner, scope, created_by);
+end $$;
+
+create or replace function upsert_task(p_token uuid, p_id text, p_title text, p_period text, p_key text, p_progress int, p_owner text, p_scope text)
+returns void language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null or not _can_write(me.id, p_owner, p_scope) then raise exception 'interdit'; end if;
+  insert into tasks(id,title,period,key,progress,owner,scope,created_by) values (p_id,p_title,p_period,p_key,p_progress,p_owner,p_scope,me.id)
+  on conflict (id) do update set title=excluded.title, progress=excluded.progress, updated_at=now()
+    where _can_modify(me.id, tasks.owner, tasks.scope, tasks.created_by);
+end $$;
+
+create or replace function delete_task(p_token uuid, p_id text) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  delete from tasks where id = p_id and _can_modify(me.id, owner, scope, created_by);
+end $$;
+
+revoke all on function _can_modify(text,text,text,text) from public, anon, authenticated;
+revoke all on function upsert_event(uuid,text,text,date,text,text,text), delete_event(uuid,text),
+  upsert_task(uuid,text,text,text,text,int,text,text), delete_task(uuid,text) from public;
+grant execute on function upsert_event(uuid,text,text,date,text,text,text), delete_event(uuid,text),
+  upsert_task(uuid,text,text,text,text,int,text,text), delete_task(uuid,text) to anon, authenticated;
