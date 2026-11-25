@@ -87,12 +87,18 @@ const isPair = (id) => PAIR.includes(id);
 
 // Règles de visibilité : le commun n'est vu que par Nelson et Sophie ; le reste que par son propriétaire
 const canSee = (it) => it.scope === "commun" ? isPair(me) : it.owner === me;
-const passes = (it) => canSee(it) && (ui.filter === "all" || (ui.filter === "commun") === (it.scope === "commun"));
+// Deux volets : « Perso » = tout ce que je vois (privé + public avec l'autre) ; « Commun » = seulement le public
+const passes = (it) => canSee(it) && (!isPair(me) || ui.filter !== "commun" || it.scope === "commun");
+const persoView = () => isPair(me) && ui.filter !== "commun";
 const colorOf = (it) => it.scope === "commun" ? (document.body.classList.contains("noel") ? "#FF5A6E" : COMMUN_COLOR) : (prof(it.owner)?.color || "#A45CFF");
 // Avancement d'une tâche : en commun, moyenne de Nelson (progress) et Sophie (progress_b)
 const pendingProg = new Map(); // % modifiés mais pas encore sauvegardés
 const tp = (t) => t.scope === "commun" ? Math.round((t.progress + (t.progress_b || 0)) / 2) : t.progress;
-const labelOf = (it) => it.scope === "commun" ? "Commun" : (prof(it.owner)?.name || "?");
+// Ma part d'une tâche : sur une tâche commune, Nelson = progress, Sophie = progress_b
+const myField = (t) => (t.scope === "commun" && me === "sophie") ? "progress_b" : "progress";
+const mine = (t) => t[myField(t)] || 0;
+const shown = (t) => persoView() ? mine(t) : tp(t); // volet Perso : seulement mon %, volet Commun : la moyenne
+const labelOf = (it) => persoView() ? (it.scope === "commun" ? "👥 Public" : "🔒 Privé") : (it.scope === "commun" ? "Commun" : (prof(it.owner)?.name || "?"));
 
 // État de l'interface (non sauvegardé)
 const ui = {
@@ -100,7 +106,7 @@ const ui = {
   selected: toISO(new Date()),
   month: startOfMonth(new Date()),
   period: "day",
-  filter: "all" // all | perso | commun
+  filter: "perso" // perso | commun
 };
 
 // ---------------------------------------------------------------
@@ -400,8 +406,8 @@ function profileBar() {
 }
 function filterBar() {
   if (!isPair(me)) return "";
-  const f = [["all", "Tout"], ["perso", "Perso"], ["commun", "Commun"]];
-  return `<div class="seg three">${f.map(([k, l]) => `<button class="${k === ui.filter ? "on" : ""}" data-act="filter" data-f="${k}">${l}</button>`).join("")}</div>`;
+  const f = [["perso", "Perso"], ["commun", "Commun"]];
+  return `<div class="seg two">${f.map(([k, l]) => `<button class="${k === ui.filter ? "on" : ""}" data-act="filter" data-f="${k}">${l}</button>`).join("")}</div>`;
 }
 function renderHero() {
   document.querySelectorAll(".spot").forEach((s) => s.classList.toggle("active", s.dataset.id === me));
@@ -485,9 +491,8 @@ function viewCalendar() {
     <div class="head">
       <div><h1>${MOIS_LONG[m.getMonth()]} ${m.getFullYear()}</h1><div class="sub">Calendrier de ${esc(prof(me).name)}</div></div>
       <div class="nav">
-        <button class="icon-btn" data-act="month" data-dir="-1">‹</button>
-        <button class="icon-btn" data-act="today">•</button>
-        <button class="icon-btn" data-act="month" data-dir="1">›</button>
+        <button class="icon-btn nav-btn" data-act="month" data-dir="-1" aria-label="Mois précédent" title="Mois précédent"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg></button>
+        <button class="icon-btn nav-btn" data-act="month" data-dir="1" aria-label="Mois suivant" title="Mois suivant"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>
       </div>
     </div>
     ${profileBar()}${filterBar()}
@@ -516,7 +521,7 @@ function viewCalendar() {
       <div class="row">
         <div class="bar-owner" style="background:${colorOf(t)}"></div>
         <div class="t"><b>${esc(t.title)}</b><small>${esc(labelOf(t))}</small></div>
-        <div class="time">${t.scope === "commun" ? `${prof("nelson")?.name[0] || "N"} ${t.progress}% · ${prof("sophie")?.name[0] || "S"} ${t.progress_b || 0}%` : t.progress + "%"}</div>
+        <div class="time">${persoView() ? mine(t) + "%" : t.scope === "commun" ? `${prof("nelson")?.name[0] || "N"} ${t.progress}% · ${prof("sophie")?.name[0] || "S"} ${t.progress_b || 0}%` : t.progress + "%"}</div>
       </div>`).join("")}</div>` : ""}
 
     <div class="card">
@@ -533,15 +538,15 @@ function viewTasks() {
   const ref = fromISO(ui.selected);
   const key = periodKey(ui.period, ref);
   const list = state.tasks.filter((t) => t.period === ui.period && t.key === key && passes(t));
-  const avg = list.length ? Math.round(list.reduce((s, t) => s + tp(t), 0) / list.length) : 0;
+  const avg = list.length ? Math.round(list.reduce((s, t) => s + shown(t), 0) / list.length) : 0;
   const labels = { day: "Jour", week: "Semaine", month: "Mois", year: "Année" };
 
   return `
     <div class="head">
       <div><h1>Tâches</h1><div class="sub">${periodLabel(ui.period, ref)}</div></div>
       <div class="nav">
-        <button class="icon-btn" data-act="shift" data-dir="-1">‹</button>
-        <button class="icon-btn" data-act="shift" data-dir="1">›</button>
+        <button class="icon-btn nav-btn" data-act="shift" data-dir="-1" aria-label="Période précédente" title="Précédent"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg></button>
+        <button class="icon-btn nav-btn" data-act="shift" data-dir="1" aria-label="Période suivante" title="Suivant"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>
       </div>
     </div>
     ${profileBar()}${filterBar()}
@@ -555,19 +560,21 @@ function viewTasks() {
 
     <div class="card">
       ${list.map((t) => {
-        const two = t.scope === "commun";
-        const sl = (val, who, c) => `<input type="range" min="0" max="100" step="5" value="${val}" data-act="slide" data-id="${t.id}" data-who="${who}" style="--v:${val};--c:${c}">`;
+        const two = t.scope === "commun" && !persoView();
+        const w1 = myField(t) === "progress_b" ? "b" : "a";
+        const sl = (val, who, c, off) => `<input type="range" min="0" max="100" step="5" value="${val}" data-act="slide" data-id="${t.id}" data-who="${who}" style="--v:${val};--c:${c}" ${off ? "disabled" : ""}>`;
         return `
-        <div class="task ${tp(t) >= 100 ? "done" : ""}" data-id="${t.id}">
+        <div class="task ${shown(t) >= 100 ? "done" : ""}" data-id="${t.id}">
           <div class="task-top">
             <i class="chip" style="background:${colorOf(t)}"></i>
             <b>${esc(t.title)}</b>
-            ${two ? "" : `<span class="pct" data-w="a">${t.progress}%</span>`}
+            ${persoView() ? `<small class="vis">${labelOf(t)}</small>` : ""}
+            ${two ? "" : `<span class="pct" data-w="${w1}">${mine(t)}%</span>`}
             <button class="del" data-act="del-task" data-id="${t.id}" aria-label="Supprimer">×</button>
           </div>
           ${two ? [["nelson", "a", t.progress], ["sophie", "b", t.progress_b || 0]].map(([id, w, v]) => `
-            <div class="who"><span style="color:${prof(id)?.color}">${esc(prof(id)?.name || id)}</span><span class="pct" data-w="${w}">${v}%</span></div>${sl(v, w === "b" ? "b" : "a", prof(id)?.color)}`).join("")
-            : sl(t.progress, "a", colorOf(t))}
+            <div class="who"><span style="color:${prof(id)?.color}">${esc(prof(id)?.name || id)}${(me === "sophie") === (w === "b") ? " (toi)" : ""}</span><span class="pct" data-w="${w}">${v}%</span></div>${sl(v, w, prof(id)?.color, (me === "sophie") !== (w === "b"))}`).join("")
+            : sl(mine(t), w1, colorOf(t))}
           <button class="btn small save-prog" data-act="save-prog" data-id="${t.id}" ${pendingProg.has(t.id) ? "" : "hidden"}>Sauvegarder</button>
         </div>`; }).join("") || `<div class="empty">Ajoute une première tâche.</div>`}
       <button class="add-btn" data-act="new-task">+ Ajouter une tâche</button>
@@ -835,7 +842,7 @@ document.addEventListener("click", (ev) => {
     case "del-task": state.tasks = state.tasks.filter((t) => t.id !== el.dataset.id); push("delete_task", { p_id: el.dataset.id }); save(); render(); break;
     case "save-prog": {
       const t = state.tasks.find((x) => x.id === el.dataset.id);
-      if (t) { pendingProg.delete(t.id); save(); push("upsert_task", tkArgs(t)); el.hidden = true; toast("Avancement sauvegardé"); }
+      if (t) { pendingProg.delete(t.id); save(); push("set_progress", { p_id: t.id, p_value: mine(t) }); el.hidden = true; toast("Avancement sauvegardé"); }
       break;
     }
     case "push-on": pushOn(); break;
@@ -923,12 +930,12 @@ document.addEventListener("input", (ev) => {
     el.style.setProperty("--v", val);
     const card = el.closest(".task");
     const pc = card.querySelector(`.pct[data-w="${w}"]`); if (pc) pc.textContent = val + "%";
-    card.classList.toggle("done", tp(t) >= 100);
+    card.classList.toggle("done", shown(t) >= 100);
     pendingProg.set(t.id, true); card.querySelector(".save-prog").hidden = false;
     // Recalcule le cercle global
     const key = periodKey(ui.period, fromISO(ui.selected));
     const list = state.tasks.filter((x) => x.period === ui.period && x.key === key && passes(x));
-    const avg = Math.round(list.reduce((s, x) => s + tp(x), 0) / list.length);
+    const avg = Math.round(list.reduce((s, x) => s + shown(x), 0) / list.length);
     $("#ring").style.setProperty("--p", avg);
     $("#ringTxt").textContent = avg + "%";
   }
@@ -960,7 +967,7 @@ function setMe(id) {
     else if (isPair(me) && isPair(id)) openEventSheet(id);
     return;
   }
-  me = id; ui.filter = "all";
+  me = id; ui.filter = "perso";
   try { localStorage.setItem(SESSION, me); } catch (e) {}
   render();
   toast(`Calendrier de ${prof(id).name}`);
@@ -1022,8 +1029,11 @@ async function pull() {
     if (snap !== lastSnap) {
       lastSnap = snap;
       const typing = sheet.open || document.activeElement?.matches?.("input, select"); // ne pas casser une saisie en cours
-      const keep = new Map(state.tasks.filter((t) => pendingProg.has(t.id)).map((t) => [t.id, t]));
-      state.profiles = d.profiles; state.events = d.events; state.tasks = d.tasks.map((t) => keep.get(t.id) || t); fixColors(state.profiles);
+      const loc = new Map(state.tasks.filter((t) => pendingProg.has(t.id)).map((t) => [t.id, t]));
+      state.profiles = d.profiles; state.events = d.events;
+      // un % pas encore sauvegardé garde SA valeur locale (ma part), le reste vient de la base
+      state.tasks = d.tasks.map((t) => { const l = loc.get(t.id); return l ? Object.assign({}, t, { [myField(t)]: l[myField(t)] }) : t; });
+      fixColors(state.profiles);
       try { localStorage.setItem(CACHE_KEY, snap); } catch (e) {}
       loaded = true;
       if (first || !typing) render();

@@ -408,3 +408,35 @@ revoke all on function change_pin(uuid, text, text) from public;
 grant execute on function change_pin(uuid, text, text) to anon, authenticated;
 drop function if exists request_pin_change(uuid, text);
 drop function if exists confirm_pin_change(uuid, text);
+
+-- ============ Migration 6 : chacun enregistre SON avancement sur une tâche commune ============
+-- Avant : l'enregistrement renvoyait toute la tâche, ce qui était refusé pour une tâche créée par l'autre
+-- (et pouvait écraser son %). Maintenant : set_progress ne modifie que la part de la personne connectée.
+create or replace function set_progress(p_token uuid, p_id text, p_value int) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token); t tasks; v int := greatest(0, least(100, coalesce(p_value, 0)));
+begin
+  select * into t from tasks where id = p_id;
+  if not found then raise exception 'introuvable'; end if;
+  if t.scope = 'commun' and _is_pair(me.id) then
+    if me.id = 'sophie' then update tasks set progress_b = v, updated_at = now() where id = p_id;
+    else update tasks set progress = v, updated_at = now() where id = p_id; end if;
+  elsif t.owner = me.id then
+    update tasks set progress = v, updated_at = now() where id = p_id;
+  else
+    raise exception 'interdit';
+  end if;
+end $$;
+revoke all on function set_progress(uuid, text, int) from public;
+grant execute on function set_progress(uuid, text, int) to anon, authenticated;
+
+-- upsert_task ne touche plus aux pourcentages d'une tâche existante (seulement le titre)
+create or replace function upsert_task(p_token uuid, p_id text, p_title text, p_period text, p_key text, p_progress int, p_owner text, p_scope text, p_progress_b int default 0)
+returns void language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null or not _can_write(me.id, p_owner, p_scope) then raise exception 'interdit'; end if;
+  insert into tasks(id,title,period,key,progress,progress_b,owner,scope,created_by) values (p_id,p_title,p_period,p_key,p_progress,coalesce(p_progress_b,0),p_owner,p_scope,me.id)
+  on conflict (id) do update set title=excluded.title, updated_at=now()
+    where _can_modify(me.id, tasks.owner, tasks.scope, tasks.created_by);
+end $$;

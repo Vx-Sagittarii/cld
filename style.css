@@ -361,3 +361,10 @@ body.login .tabbar, body.login #fab, body.login .fab { display: none !important;
 .keypad button { padding: 16px 0; font-size: 22px; font-weight: 600; border-radius: 16px; background: rgba(255,255,255,.08); color: var(--text); touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
 .keypad button:active { background: rgba(255,255,255,.2); transform: scale(.97); }
 .keypad button.alt { color: var(--muted); font-size: 18px; }
+
+/* ---------- Navigation et volets ---------- */
+.seg.two { grid-template-columns: repeat(2, 1fr); }
+.nav-btn { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; }
+.nav-btn svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.task input[type=range]:disabled { opacity: .45; }
+.task .vis { font-size: 12px; color: var(--muted); white-space: nowrap; }
