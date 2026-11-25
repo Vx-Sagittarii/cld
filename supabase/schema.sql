@@ -902,3 +902,106 @@ revoke all on function set_sport_targets(uuid,jsonb), set_sport_custom(uuid,text
   set_perms(uuid,text,jsonb), get_admin(uuid), claim_invite(uuid,text,text,text) from public;
 grant execute on function set_sport_targets(uuid,jsonb), set_sport_custom(uuid,text,text), delete_sport_custom(uuid,text), create_invite(uuid,text,jsonb), revoke_invite(uuid,uuid),
   set_perms(uuid,text,jsonb), get_admin(uuid), claim_invite(uuid,text,text,text) to anon, authenticated;
+-- ============ Migration 15 : durcissement (droits côté serveur, validations) ============
+create or replace function _perm(p_me profiles, p_key text) returns boolean
+language sql immutable as $$
+  select coalesce(p_me.is_admin, false) or _is_pair(p_me.id) or coalesce((p_me.perms ->> p_key)::boolean, true);
+$$;
+
+create or replace function upsert_task(p_token uuid, p_id text, p_title text, p_period text, p_key text, p_progress int, p_owner text, p_scope text, p_progress_b int default 0)
+returns void language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null or not _can_write(me.id, p_owner, p_scope) then raise exception 'interdit'; end if;
+  if not _perm(me, 'tasks') then raise exception 'fonction désactivée'; end if;
+  insert into tasks(id,title,period,key,progress,progress_b,owner,scope,created_by)
+  values (p_id,left(trim(coalesce(p_title,'')),200),p_period,p_key,greatest(0,least(100,coalesce(p_progress,0))),greatest(0,least(100,coalesce(p_progress_b,0))),p_owner,p_scope,me.id)
+  on conflict (id) do update set title=excluded.title, updated_at=now()
+    where _can_modify(me.id, tasks.owner, tasks.scope, tasks.created_by);
+end $$;
+
+create or replace function set_sport_targets(p_token uuid, p_targets jsonb) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token); mon date := date_trunc('week', now() at time zone 'Europe/Paris')::date; k text; clean jsonb := '{}'::jsonb; n int;
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  if not _perm(me, 'sport') then raise exception 'fonction désactivée'; end if;
+  for k in select jsonb_object_keys(coalesce(p_targets, '{}'::jsonb)) loop
+    if k !~ '^(gym|pole|run|c_[a-z0-9]{3,12})$' then continue; end if;
+    n := greatest(0, least(7, coalesce((p_targets ->> k)::int, 0)));
+    clean := clean || jsonb_build_object(k, n);
+  end loop;
+  insert into sport_goals(profile_id, from_week, gym, pole, targets)
+  values (me.id, mon, coalesce((clean ->> 'gym')::int, 0), coalesce((clean ->> 'pole')::int, 0), clean)
+  on conflict (profile_id, from_week) do update set gym = excluded.gym, pole = excluded.pole, targets = excluded.targets;
+end $$;
+
+create or replace function set_sport_log(p_token uuid, p_day date, p_kind text, p_on boolean) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  if not _perm(me, 'sport') then raise exception 'fonction désactivée'; end if;
+  if p_kind !~ '^(pole|run|c_[a-z0-9]{3,12})$' or p_day < current_date - 400 or p_day > current_date + 1 then raise exception 'invalide'; end if;
+  if coalesce(p_on, false) then
+    insert into sport_logs(profile_id, day, kind) values (me.id, p_day, p_kind) on conflict do nothing;
+  else
+    delete from sport_logs where profile_id = me.id and day = p_day and kind = p_kind;
+  end if;
+end $$;
+
+create or replace function set_sport_custom(p_token uuid, p_id text, p_name text) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token); nm text := left(trim(coalesce(p_name, '')), 24);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  if not _perm(me, 'sport') then raise exception 'fonction désactivée'; end if;
+  if p_id !~ '^c_[a-z0-9]{3,12}$' or char_length(nm) < 1 then raise exception 'invalide'; end if;
+  if not exists (select 1 from sport_custom where profile_id = me.id and id = p_id)
+     and (select count(*) from sport_custom where profile_id = me.id) >= 12 then raise exception '12 activités maximum'; end if;
+  insert into sport_custom(profile_id, id, name) values (me.id, p_id, nm)
+  on conflict (profile_id, id) do update set name = excluded.name;
+end $$;
+
+create or replace function set_hevy_key(p_token uuid, p_key text) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token); k text := trim(coalesce(p_key, ''));
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  if not _perm(me, 'integrations') then raise exception 'fonction désactivée'; end if;
+  if k = '' then
+    delete from hevy_keys where profile_id = me.id;
+    delete from workouts where profile_id = me.id;
+    return;
+  end if;
+  if k !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then raise exception 'clé invalide'; end if;
+  insert into hevy_keys(profile_id, api_key) values (me.id, lower(k))
+  on conflict (profile_id) do update set api_key = excluded.api_key, synced_at = null, updated_at = now();
+end $$;
+
+create or replace function set_watch_key(p_token uuid, p_provider text, p_api_key text, p_client_id text, p_client_secret text) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  if not _perm(me, 'integrations') then raise exception 'fonction désactivée'; end if;
+  if p_provider not in ('strava','garmin') then raise exception 'invalide'; end if;
+  insert into watch_keys(profile_id, provider, api_key, client_id, client_secret)
+  values (me.id, p_provider, nullif(trim(p_api_key), ''), nullif(trim(p_client_id), ''), nullif(trim(p_client_secret), ''))
+  on conflict (profile_id, provider) do update set api_key = excluded.api_key, client_id = excluded.client_id, client_secret = excluded.client_secret,
+    refresh_token = null, access_token = null, expires_at = null;
+end $$;
+
+-- set_perms : ne garde que les clés connues, en booléens
+create or replace function set_perms(p_token uuid, p_id text, p_perms jsonb) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token); k text; clean jsonb := '{}'::jsonb;
+begin
+  if me.id is null or not me.is_admin or _is_pair(p_id) then raise exception 'interdit'; end if;
+  for k in select unnest(array['tasks','sport','astro','integrations']) loop
+    if p_perms ? k and jsonb_typeof(p_perms -> k) = 'boolean' then clean := clean || jsonb_build_object(k, p_perms -> k); end if;
+  end loop;
+  update profiles set perms = clean where id = p_id;
+end $$;
+
+revoke all on function _perm(profiles, text) from public;

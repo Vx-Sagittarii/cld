@@ -53,9 +53,18 @@ async function rpc(fn, args) {
   return t ? JSON.parse(t) : null;
 }
 // Envoie une modification à la base (la mise à jour de l'écran est déjà faite, localement)
+let inflight = 0; // écritures en cours : on ne rafraîchit pas pendant ce temps (sinon une ancienne valeur écraserait la nouvelle)
 function push(fn, args) {
   if (!cloud) return;
-  rpc(fn, Object.assign({ p_token: token }, args)).catch((e) => { console.warn(fn, e); toast("Hors connexion : modification non enregistrée"); });
+  inflight++;
+  rpc(fn, Object.assign({ p_token: token }, args))
+    .catch((e) => {
+      console.warn(fn, e);
+      const m = String((e && e.message) || "");
+      toast(m.includes("désactivée") ? "Cette fonction est désactivée pour ton profil" : "Modification non enregistrée : vérifie ta connexion");
+      lastSnap = ""; // force le retour à l'état réel de la base
+    })
+    .finally(() => { inflight = Math.max(0, inflight - 1); if (!inflight) setTimeout(() => { try { pull(); } catch (e) {} }, 400); });
 }
 const evArgs = (e) => ({ p_id: e.id, p_title: e.title, p_date: e.date, p_time: e.time || "", p_owner: e.owner, p_scope: e.scope, p_meta: e.meta || "" });
 const tkArgs = (t) => ({ p_id: t.id, p_title: t.title, p_period: t.period, p_key: t.key, p_progress: t.progress, p_progress_b: t.progress_b || 0, p_owner: t.owner, p_scope: t.scope });
@@ -665,28 +674,51 @@ function sportGoalEditor() {
     <div class="goal-ed" style="margin-top:16px"><b>Ajouter une activité à toi</b></div>
     <div class="btn-line"><input id="cuName" maxlength="24" placeholder="ex. Natation, Yoga, Escalade…" style="flex:1"><button class="btn small" data-act="custom-add">Ajouter</button></div></div>${sportGoalCard(me)}`;
 }
+// Une ligne « case à cocher » : cochée toute seule si la séance vient de Hevy / Strava / Garmin, sinon on la coche à la main
+function chkRow(label, done, opts) {
+  const o = opts || {}, det = (o.details || []).map((d) => `<small>${d}</small>`).join("");
+  const box = `<span class="cb ${done ? "on" : ""}">${done ? "✓" : ""}</span>`;
+  const body = `<span class="cl"><b>${label}</b>${det}</span>`;
+  if (o.toggle) return `<button type="button" class="chk ${done ? "on" : ""}" data-act="log-toggle" data-kind="${o.kind}" data-day="${o.day}">${box}${body}</button>`;
+  return `<div class="chk auto ${done ? "on" : ""}">${box}${body}</div>`;
+}
+const actLink = (a) => a.provider === "strava" ? `https://www.strava.com/activities/${String(a.id).replace(/^strava:/, "")}` : a.provider === "garmin" ? `https://connect.garmin.com/modern/activity/${String(a.id).replace(/^garmin:/, "")}` : "";
 function sportCard() {
   const pair = state.profiles.filter((p) => isPair(p.id));
-  const ws = (state.workouts || []).filter((w) => w.day === ui.selected && pair.some((p) => p.id === w.owner) && (!viewing() || w.owner === ui.viewAs));
-  const wHtml = ws.length ? ws.map((w) => `
-    <div class="row"><div class="bar-owner" style="background:${prof(w.owner)?.color || "#888"}"></div>
-      <div class="t"><b>🏋️ ${esc(w.title)}</b><small>${esc(prof(w.owner)?.name || "")} · ${[fmtDur(w.start, w.end), w.ex.length + (w.ex.length > 1 ? " exos" : " exo"), w.sets + (w.sets > 1 ? " séries" : " série"), w.vol ? fmtVol(w.vol) : ""].filter(Boolean).join(" · ")}</small>
-      <small>${w.ex.slice(0, 6).map((e) => esc(e.t) + " ×" + e.s).join(" · ")}${w.ex.length > 6 ? " …" : ""}</small></div></div>`).join("")
-    : `<div class="empty">${hevyOn || pair.some((p) => p.id !== me) ? "Aucune séance ce jour-là." : "Connecte Hevy dans Réglages pour voir tes séances ici."}</div>`;
-  const btns = [];
-  pair.forEach((p) => {
-    const l = p.links || {};
-    if (okUrl(l.hevy)) btns.push(`<a class="btn small" href="${esc(l.hevy)}" target="_blank" rel="noopener">🏋️ Hevy · ${esc(p.name)}</a>`);
-    if (okUrl(l.strava)) btns.push(`<a class="btn small" href="${esc(l.strava)}" target="_blank" rel="noopener">🏃 Strava · ${esc(p.name)}</a>`);
+  const who = viewing() ? ui.viewAs : me, own = who === me && !viewing(), day = ui.selected;
+  const wp = prof(who);
+  const hevyUrl = (id) => { const l = (prof(id)?.links || {}).hevy; return okUrl(l) ? l : ""; };
+  const myW = (state.workouts || []).filter((w) => w.owner === who && w.day === day);
+  const myA = (state.acts || []).filter((a) => a.owner === who && lday(a) === day);
+  const used = new Set();
+  const rows = kindsOf(who).map(([k, label]) => {
+    if (k === "gym") {
+      const det = myW.map((w) => { const u = hevyUrl(w.owner); const t = `🏋️ ${esc(w.title)}`; return `${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${t} ↗ Hevy</a>` : t} · ${[fmtDur(w.start, w.end), w.ex.length + (w.ex.length > 1 ? " exos" : " exo"), w.sets + (w.sets > 1 ? " séries" : " série"), w.vol ? fmtVol(w.vol) : ""].filter(Boolean).join(" · ")}`; });
+      return chkRow(label, myW.length > 0, { details: det });
+    }
+    const wa = k === "run" ? myA.filter((a) => RUN_RE.test(String(a.kind || "").toLowerCase())) : [];
+    wa.forEach((a) => used.add(a.id));
+    if (wa.length) {
+      const det = wa.map((a) => { const u = actLink(a), t = `${kindOf(a.kind)[0]} ${esc(a.title || kindOf(a.kind)[1])}`; return `${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${t} ↗ ${esc(WATCH[a.provider] || "")}</a>` : t} · ${[a.secs ? fmtSecs(a.secs) : "", a.dist ? fmtKm(a.dist) : "", a.hr ? a.hr + " bpm" : ""].filter(Boolean).join(" · ")}`; });
+      return chkRow(label, true, { details: det });
+    }
+    const on = hasLog(who, day, k);
+    return chkRow(label, on, own ? { toggle: true, kind: k, day, details: on ? ["Saisi à la main"] : [] } : {});
   });
-  const who = viewing() ? ui.viewAs : me, own = who === me && !viewing();
-  const poleBtn = manualBtns(who, ui.selected);
-  const ago = hevySyncAt ? ` · mis à jour ${new Date(hevySyncAt).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : "";
-  const refresh = hevyOn && own ? `<button class="btn small" data-act="hevy-refresh">↻ Actualiser mes séances</button>` : "";
-  return `<div class="card"><h3>Sport</h3>${wHtml}
-    ${(poleBtn || refresh) ? `<div class="btn-line" style="flex-wrap:wrap;margin-top:8px">${poleBtn}${refresh}</div>` : ""}
-    ${refresh && ago ? `<small class="muted">${ago.slice(3)}</small>` : ""}
-    ${btns.length ? `<div class="btn-line" style="flex-wrap:wrap;margin-top:8px">${btns.join("")}</div>` : ""}</div>${cloud && !permOff("sport") ? sportGoalCard(who) : ""}`;
+  // autres activités de montre du jour (vélo, marche…) : cochées automatiquement
+  myA.filter((a) => !used.has(a.id)).forEach((a) => {
+    const [ic, nm] = kindOf(a.kind), u = actLink(a), t = `${ic} ${esc(a.title || nm)}`;
+    rows.push(chkRow(nm, true, { details: [`${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${t} ↗ ${esc(WATCH[a.provider] || "")}</a>` : t} · ${[a.secs ? fmtSecs(a.secs) : "", a.dist ? fmtKm(a.dist) : "", a.hr ? a.hr + " bpm" : ""].filter(Boolean).join(" · ")}`] }));
+  });
+  // séances Hevy de l'autre membre du couple (consultation)
+  const other = !viewing() ? (state.workouts || []).filter((w) => w.owner !== me && isPair(w.owner) && w.day === day) : [];
+  const oHtml = other.map((w) => `<div class="row"><div class="bar-owner" style="background:${prof(w.owner)?.color || "#888"}"></div><div class="t"><b>🏋️ ${esc(w.title)}</b><small>${esc(prof(w.owner)?.name || "")} · ${[fmtDur(w.start, w.end), w.ex.length + (w.ex.length > 1 ? " exos" : " exo"), w.sets + (w.sets > 1 ? " séries" : " série")].filter(Boolean).join(" · ")}</small></div></div>`).join("");
+  const ago = hevySyncAt ? new Date(hevySyncAt).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+  const refresh = (hevyOn || (state.watch || []).some((w) => w.linked)) && own ? `<button class="btn small" data-act="hevy-refresh">↻ Actualiser mes séances</button>` : "";
+  const hint = !hevyOn && own && !(state.watch || []).length ? `<small class="muted">Connecte Hevy ou ta montre dans Réglages pour que les séances se cochent toutes seules.</small>` : "";
+  return `<div class="card"><h3>Sport${wp && viewing() ? " · " + esc(wp.name) : ""}</h3>
+    <div class="chks">${rows.join("")}</div>${oHtml}${hint}
+    ${refresh ? `<div class="btn-line" style="margin-top:8px">${refresh}</div>` : ""}${refresh && ago ? `<small class="muted">Mis à jour ${ago}</small>` : ""}</div>${cloud && !permOff("sport") ? sportGoalCard(who) : ""}`;
 }
 
 // ----- Onglet Sport : séances Hevy du mois (par personne) -----
@@ -786,7 +818,7 @@ function viewSport() {
       <div><b>${mins >= 60 ? Math.floor(mins / 60) + " h " + String(mins % 60).padStart(2, "0") : mins + " min"}</b><span>d'effort</span></div>
       <div><b>${vol ? fmtVol(vol) : "–"}</b><span>soulevé</span></div>
     </div>
-    ${manualTxt ? `<div class="polecount">${manualTxt} <small>jours ce mois-ci (saisis à la main)</small></div>` : ""}
+    ${manualTxt ? `<div class="polecount">${manualTxt} <small>ce mois-ci (jours saisis à la main)</small></div>` : ""}
     ${cloud && !permOff("sport") ? sportGoalCard(who) : ""}
     <div class="card">
       <h3>Jours d'entraînement <small class="legend"><i class="lg gym"></i>salle <i class="lg pole"></i>saisi <i class="lg act"></i>montre</small></h3>
@@ -1053,7 +1085,7 @@ function viewSettings() {
     ? (isAdmin ? `<div class="card"><h3>Connexion</h3>
         <p class="muted">Chacun se connecte avec son e-mail et un code numérique. Pour Sophie : envoie-lui l'adresse de l'appli ; elle saisit son e-mail et son code (indice affiché : « devine »). Son e-mail est enregistré à sa première connexion. Après 5 erreurs, la connexion est bloquée 15 minutes.</p>
         <div class="btn-line"><button class="btn small" data-act="copy-app">Copier l'adresse de l'appli</button></div></div>`
-      : `<div class="card"><h3>Ton espace</h3><p class="muted">Tu es connectée avec ton e-mail et ton code. Ne les partage pas : ils donnent accès à ton calendrier.</p></div>`)
+      : `<div class="card"><h3>Ton espace</h3><p class="muted">Tu es connecté(e) avec ton e-mail et ton code. Ne les partage pas : ils donnent accès à ton calendrier.</p></div>`)
     : `<div class="card"><h3>Mode sur ce téléphone</h3><p class="muted">Données enregistrées sur cet appareil uniquement.</p></div>`;
   return `
     <div class="head"><div><h1>Réglages</h1><div class="sub">Personnalise ton espace</div></div></div>
@@ -1061,7 +1093,7 @@ function viewSettings() {
       <h3>Profils</h3>
       ${rows}
       ${!lock ? `<button class="add-btn" data-act="new-profile">+ Ajouter un profil</button>` : ""}
-      <p class="muted">Nelson et Sophie ont chacun leur calendrier et partagent le calendrier « Commun ». Les autres profils sont de simples noms avec leur propre calendrier privé.</p>
+      <p class="muted">${cloud && !isAdmin && !PAIR.includes(me) ? "Ton calendrier est privé : toi seul(e) y as accès." : "Nelson et Sophie ont chacun leur calendrier et partagent le calendrier « Commun ». Les autres profils sont de simples noms avec leur propre calendrier privé."}</p>
     </div>
     ${linkCard}
     ${cloud && isAdmin ? `<div class="card"><h3>Administration</h3><p class="muted">Invite de nouvelles personnes par lien et choisis ce que chacun peut utiliser.</p><div class="btn-line"><button class="btn small primary" data-act="admin-open">Gérer les invitations et les droits</button></div></div>` : ""}
@@ -1088,10 +1120,6 @@ function viewSettings() {
       </div>
       <div class="btn-line">${cloud ? `<button class="btn small danger" data-act="logout">Se déconnecter de ce téléphone</button>` : `<button class="btn small danger" data-act="reset">Tout effacer</button>`}</div>
       <input type="file" id="importFile" accept="application/json" hidden>
-    </div>
-    <div class="card">
-      <h3>Connexions sport</h3>
-      <p class="muted">Hevy et Strava seront branchés dans une prochaine étape. Rappel : Strava n'autorise l'affichage que de tes propres activités.</p>
     </div>`;
 }
 
@@ -1237,7 +1265,7 @@ document.addEventListener("click", (ev) => {
       state.logs = (state.logs || []).filter((l) => !(l.owner === me && l.kind === kind && lday(l) === day));
       if (on) state.logs.push({ owner: me, day, kind });
       render(); lastSnap = "";
-      rpc("set_sport_log", { p_token: token, p_day: day, p_kind: kind, p_on: on }).catch(() => { toast("Enregistrement impossible"); pull(); });
+      push("set_sport_log", { p_day: day, p_kind: kind, p_on: on });
       break;
     }
     case "goal-set": {
@@ -1403,6 +1431,7 @@ document.addEventListener("click", (ev) => {
       const p = prof(el.dataset.id);
       if (p && confirm(`Supprimer le profil « ${p.name} » et ses événements ?`)) {
         state.profiles = state.profiles.filter((x) => x.id !== p.id);
+        if (state.admin && state.admin.users) state.admin.users = state.admin.users.filter((x) => x.id !== p.id);
         state.events = state.events.filter((x) => x.owner !== p.id || x.scope === "commun");
         state.tasks = state.tasks.filter((x) => x.owner !== p.id || x.scope === "commun");
         if (!cloud && me === p.id) me = "nelson";
@@ -1569,9 +1598,11 @@ render();
 // Charge les données du profil, puis rafraîchit régulièrement (pour voir ce que l'autre ajoute)
 let lastSnap = "";
 async function pull() {
+  if (inflight) return;
   try {
     const d = await rpc("get_data", { p_token: token });
     try { d.sport = await rpc("get_sport", { p_token: token }); } catch (e) { d.sport = { goals: state.goals || [], logs: state.logs || [], watch: state.watch || [], acts: state.acts || [], custom: state.custom || [], perms: state.perms || {} }; }
+    if (inflight) return; // une écriture a démarré pendant la lecture : on garde l'état local
     const snap = JSON.stringify(d);
     me = d.me.id; isAdmin = !!d.me.admin; gShared = !!d.me.gcal_shared; hevyOn = !!d.me.hevy; hevySyncAt = d.me.hevy_sync || null;
     const first = !loaded;
