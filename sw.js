@@ -1,7 +1,7 @@
 // Service worker : met les fichiers de l'appli en cache pour qu'elle s'ouvre
 // instantanément et fonctionne hors ligne. Change CACHE à chaque mise à jour
 // pour forcer les téléphones à récupérer la nouvelle version.
-const CACHE = "iwi2me-v9";
+const CACHE = "iwi2me-v10";
 const FILES = [
   "./",
   "./index.html",
@@ -17,7 +17,7 @@ const FILES = [
 ];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)));
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES.map((u) => new Request(u, { cache: "reload" })))));
   self.skipWaiting();
 });
 
@@ -35,7 +35,7 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET") return;
   e.respondWith(
-    fetch(e.request)
+    fetch(e.request, { cache: "no-store" })
       .then((res) => {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(e.request, copy));
