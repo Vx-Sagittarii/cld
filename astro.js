@@ -88,6 +88,7 @@
     return ["Neutre", "Ni facilité particulière ni blocage : tout dépend de vous deux."];
   };
 
+  const API = { taureau: "taurus", sagittaire: "sagittarius" };
   const dateFr = (d) => d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
 
   // ---- Rendu ----
@@ -95,6 +96,16 @@
     const p = PROFILS[id];
     if (!p) return `<div class="card"><p class="muted">Pas de signe renseigné pour ce profil.</p></div>`;
     const sg = SIGNES[p.sign], lu = lune(date), l = lecture(id, date, lu);
+    const real = (window.AstroData || {})[API[p.sign]];
+    const txt = real && (real.fr || real.en);
+    const body = txt
+      ? `<p class="astro-p">${txt.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]))}</p>
+         <p class="astro-p">💞 ${l.c}</p>
+         <small class="muted">Horoscope du jour fourni par APIVerve${real.fr ? ", traduit automatiquement" : " (en anglais)"}.</small>`
+      : `<p class="astro-p">${l.a}</p>
+         <p class="astro-p">${l.b}</p>
+         <p class="astro-p">💞 ${l.c}</p>
+         <small class="muted">Lecture composée par l'appli à partir du signe et de la lune du jour (horoscope en ligne indisponible).</small>`;
     return `
       <div class="card astro-card">
         <div class="astro-top">
@@ -107,10 +118,7 @@
       <div class="card">
         <h3>Aujourd'hui</h3>
         <small class="muted">${dateFr(date)} · ${lu.emo} ${lu.phase} en ${lu.signe} (${lu.illum}%)</small>
-        <p class="astro-p">${l.a}</p>
-        <p class="astro-p">${l.b}</p>
-        <p class="astro-p">💞 ${l.c}</p>
-        <small class="muted">Lecture composée par l'appli à partir du signe et de la lune du jour. Ce n'est pas The Pattern.</small>
+        ${body}
       </div>`;
   }
 
@@ -136,6 +144,20 @@
         <p class="astro-p">💞 ${pick(COUPLE, hash("duo" + date.toISOString().slice(0, 10)))}</p></div>
       <small class="muted">Lecture indicative basée sur les signes uniquement, à prendre comme un jeu.</small>`;
   }
+
+  // Chargement de l'horoscope du jour (fonction Supabase, mis en cache par jour dans le navigateur)
+  let loading = false;
+  window.AstroLoad = function (url, done) {
+    if (loading || !url) return;
+    const day = new Date().toLocaleDateString("sv-SE");
+    try { const c = JSON.parse(localStorage.getItem("iwi_astro") || "null"); if (c && c.day === day && c.data && (c.data.taurus || c.data.sagittarius)) { window.AstroData = c.data; return; } } catch (e) {}
+    loading = true;
+    fetch(url + "/functions/v1/horoscope").then((r) => r.json()).then((d) => {
+      window.AstroData = d;
+      try { localStorage.setItem("iwi_astro", JSON.stringify({ day, data: d })); } catch (e) {}
+      loading = false; done();
+    }).catch(() => { loading = false; });
+  };
 
   window.AstroView = function (sub, ctx) {
     const date = new Date();

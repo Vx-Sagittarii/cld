@@ -588,6 +588,7 @@ async function pushOff() {
 // ----- Astro -----
 function viewAstro() {
   if (!ui.astro) ui.astro = PAIR.includes(me) ? me : "nelson";
+  if (cloud) window.AstroLoad?.(CFG.url, () => { if (ui.tab === "astro") render(); });
   try {
     return window.AstroView(ui.astro, { nameOf: (id) => esc(prof(id)?.name || id), colorOf: (id) => prof(id)?.color || "#fff" });
   } catch (e) { return `<div class="empty">Astro indisponible</div>`; }
