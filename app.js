@@ -260,6 +260,17 @@ function pinKey(k) {
   const d = document.querySelector("#lgDots"); if (d) d.innerHTML = pinDots();
 }
 const INVITE = (() => { try { const c = new URLSearchParams(location.search).get("invite"); return /^[0-9a-f-]{36}$/i.test(c || "") ? c : null; } catch (e) { return null; } })();
+// Bandeaux de l'accueil : alertes (admin seulement) et rappel d'objectif sport (fin de semaine)
+function banners() {
+  if (!cloud || viewing()) return "";
+  const out = [], dis = ui.banDis || (ui.banDis = {});
+  if (isAdmin && state.admin?.alerts?.length && !dis.adm) out.push(`<div class="banner warn"><div><b>⚠️ Admin</b>${state.admin.alerts.map((x) => `<small>${esc(x)}</small>`).join("")}</div><div class="bb"><button class="btn small" data-act="admin-open-tab">Voir</button><button class="x" data-act="ban-x" data-k="adm" aria-label="Masquer">×</button></div></div>`);
+  if (!permOff("sport") && !dis.goal) {
+    const dow = (new Date().getDay() + 6) % 7, st = weekStats(me, weekMon(toISO(new Date())));
+    if (dow >= 4 && st.has && !st.ok) out.push(`<div class="banner"><div><b>🎯 Objectif sport de la semaine</b><small>${st.items.filter((i) => i.done < i.goal).map((i) => `${esc(i.label)} ${i.done}/${i.goal}`).join(" · ")}</small></div><div class="bb"><button class="x" data-act="ban-x" data-k="goal" aria-label="Masquer">×</button></div></div>`);
+  }
+  return out.join("");
+}
 function viewSignup() {
   return `<div class="login-box">
     <h1>iwi2me</h1>
@@ -294,13 +305,13 @@ function viewLogin() {
 function render(animate = false) {
   document.body.classList.toggle("login", needLogin);
   if (needLogin) { view.innerHTML = viewLogin(); hero.classList.add("off"); return; }
-  if (permOff(ui.tab)) ui.tab = "cal";
+  if (permOff(ui.tab)) { ui.tab = "cal"; toast("Cette fonction est désactivée pour ton profil. Demande à Nelson pour l'activer."); }
   document.querySelectorAll(".tab").forEach((t) => { t.classList.toggle("on", t.dataset.tab === ui.tab); t.hidden = permOff(t.dataset.tab); });
   document.body.classList.toggle("solo", cloud && !isPair(me));
   renderHero();
   applySeason();
   if (!loaded) { view.innerHTML = `<div class="empty">Chargement…</div>`; return; }
-  if (ui.tab === "cal") view.innerHTML = viewCalendar();
+  if (ui.tab === "cal") view.innerHTML = banners() + viewCalendar();
   else if (ui.tab === "tasks") view.innerHTML = viewTasks();
   else if (ui.tab === "sport") view.innerHTML = viewSport();
   else if (ui.tab === "astro") view.innerHTML = viewAstro();
@@ -665,14 +676,19 @@ function sportGoalEditor() {
   const who = viewing() ? ui.viewAs : me, mon = weekMon(toISO(new Date()));
   if (viewing()) return sportGoalCard(who);
   const cur = targetsOf(goalFor(who, mon)), d = ui.goalDraft || cur, ks = kindsOf(me);
+  const wend = toISO(addDays(fromISO(mon), 6)), doneK = (k) => daysOf(me, k, mon, wend).size;
   const chips = (k) => Array.from({ length: 8 }, (_, v) => `<button type="button" class="nchip ${(d[k] || 0) === v ? "on" : ""}" data-act="goal-set" data-k="${k}" data-v="${v}">${v}</button>`).join("");
   const dirty = !!ui.goalDraft && ks.some(([k]) => (d[k] || 0) !== (cur[k] || 0));
   return `<div class="card" id="sport-goal"><h3>🎯 Objectif sport (par semaine)</h3>
     <p class="muted">Combien de jours par semaine pour chaque activité ? La salle se compte toute seule avec Hevy, la course avec ta montre (Strava / Garmin). Tu peux aussi cocher des jours à la main dans l'onglet Sport.</p>
-    ${ks.map(([k, label]) => `<div class="goal-ed"><b>${esc(label)}${k.startsWith("c_") ? ` <button type="button" class="del-mini" data-act="custom-del" data-id="${k}" aria-label="Supprimer cette activité">×</button>` : ""}</b><span>${d[k] || 0} / 7 jours</span></div><div class="nchips">${chips(k)}</div>`).join("")}
+    ${ks.map(([k, label]) => `<div class="goal-ed"><b>${esc(label)}${k.startsWith("c_") ? ` <button type="button" class="del-mini" data-act="custom-del" data-id="${k}" aria-label="Supprimer cette activité">×</button>` : ""}</b><span>${doneK(k)} fait${doneK(k) > 1 ? "s" : ""} cette semaine · objectif ${d[k] || 0} / 7</span></div>${(cur[k] || 0) > 0 ? `<div class="mbar slim"><i style="width:${Math.min(100, Math.round((doneK(k) / cur[k]) * 100))}%;--c:${doneK(k) >= cur[k] ? "#3DDC97" : "#A45CFF"}"></i></div>` : ""}<div class="nchips">${chips(k)}</div>`).join("")}
     <div class="btn-line"><button class="btn small ${dirty ? "primary" : ""}" data-act="goal-save" ${dirty ? "" : "disabled"}>Enregistrer l'objectif</button></div>
     <div class="goal-ed" style="margin-top:16px"><b>Ajouter une activité à toi</b></div>
-    <div class="btn-line"><input id="cuName" maxlength="24" placeholder="ex. Natation, Yoga, Escalade…" style="flex:1"><button class="btn small" data-act="custom-add">Ajouter</button></div></div>${sportGoalCard(me)}`;
+    <div class="btn-line"><input id="cuName" maxlength="24" placeholder="ex. Natation, Yoga, Escalade…" style="flex:1"><button class="btn small" data-act="custom-add">Ajouter</button></div>${lastWeekLine(me)}</div>`;
+}
+function lastWeekLine(who) {
+  const mon = weekMon(toISO(new Date())), r = weekStats(who, toISO(addDays(fromISO(mon), -7)));
+  return r.has ? `<div class="lastweek ${r.ok ? "ok" : "ko"}" style="margin-top:12px">Semaine dernière : ${r.ok ? "objectif réussi ✓" : "objectif manqué"} <small>(${esc(sumTxt(r))})</small></div>` : "";
 }
 // Une ligne « case à cocher » : cochée toute seule si la séance vient de Hevy / Strava / Garmin, sinon on la coche à la main
 function chkRow(label, done, opts) {
@@ -1053,23 +1069,33 @@ document.addEventListener("input", (ev) => { if (ev.target.classList?.contains("
 // ----- Administration (Nelson) : invitations par lien + droits de chaque profil -----
 const PERM_DEFS = [["tasks", "✅ Tâches"], ["sport", "🏋️ Sport et objectifs"], ["astro", "✨ Astro"], ["integrations", "🔗 Connexions (Hevy, montre, Google Agenda)"]];
 const inviteUrl = (c) => location.origin + location.pathname + "?invite=" + c;
-function loadAdmin() { rpc("get_admin", { p_token: token }).then((d) => { state.admin = d; if (ui.admin) render(); }).catch(() => toast("Chargement impossible")); }
+function loadAdmin(quiet) { rpc("get_admin", { p_token: token }).then((d) => { state.admin = d; if (ui.admin || (quiet && ui.tab === "cal" && !sheet.open)) render(); }).catch(() => { if (!quiet) toast("Chargement impossible"); }); }
 function permRow(on, attrs, label) { return `<button type="button" class="prow ${on ? "on" : ""}" role="switch" aria-checked="${on}" ${attrs}><span>${label}</span><i class="pk"></i></button>`; }
 function viewAdmin() {
   const ad = state.admin || { users: [], invites: [] }, dp = ui.invPerms || { tasks: true, sport: true, astro: true, integrations: true };
   const fmt = (x) => new Date(x).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
   const invs = ad.invites.map((i) => `<div class="inv"><div><b>${esc(i.label || "Invitation")}</b><small>valable jusqu'au ${fmt(i.expires)} · ${PERM_DEFS.filter(([k]) => i.perms[k] === false).map(([, l]) => "sans " + l.replace(/^\S+\s/, "")).join(", ") || "tous les droits"}</small></div>
       <div class="btn-line"><button class="btn small" data-act="inv-copy" data-code="${i.code}">Copier le lien</button><button class="btn small danger" data-act="inv-revoke" data-code="${i.code}">Annuler</button></div></div>`).join("");
-  const users = ad.users.map((u) => `<div class="usr"><div class="usr-h"><i class="dot-lg" style="background:${u.color}"></i><b>${esc(u.name)}</b><button class="del" data-act="del-profile" data-id="${u.id}" aria-label="Supprimer">×</button></div>
-      ${PERM_DEFS.map(([k, l]) => permRow(u.perms[k] !== false, `data-act="perm-toggle" data-id="${u.id}" data-k="${k}"`, l)).join("")}</div>`).join("");
-  return `<div class="head"><div><h1>Administration</h1><div class="sub">Invitations et droits</div></div><button class="btn small" data-act="admin-close">← Réglages</button></div>
+  const ago = (x) => { if (!x) return "jamais"; const m = Math.round((Date.now() - new Date(x)) / 60000); return m < 2 ? "à l'instant" : m < 60 ? `il y a ${m} min` : m < 2880 ? `il y a ${Math.round(m / 60)} h` : `il y a ${Math.round(m / 1440)} j`; };
+  const pend = ad.users.filter((u) => u.status === "pending");
+  const pendHtml = pend.map((u) => `<div class="usr"><div class="usr-h"><i class="dot-lg" style="background:${u.color}"></i><b>${esc(u.name)}</b></div>
+      <small class="muted">${esc(u.email || "")} · demandé ${ago(u.requested)} · ${PERM_DEFS.filter(([k]) => (u.perms || {})[k] === false).map(([, l]) => "sans " + l.replace(/^\S+\s/, "")).join(", ") || "tous les droits"}</small>
+      <div class="btn-line"><button class="btn small primary" data-act="acc-ok" data-id="${u.id}">Accepter</button><button class="btn small danger" data-act="acc-no" data-id="${u.id}">Refuser</button></div></div>`).join("");
+  const users = ad.users.filter((u) => u.status !== "pending").map((u) => `<div class="usr ${u.status === "blocked" ? "blocked" : ""}"><div class="usr-h"><i class="dot-lg" style="background:${u.color}"></i><b>${esc(u.name)}</b>${u.status === "blocked" ? ` <span class="tag-admin">suspendu</span>` : ""}<button class="del" data-act="del-profile" data-id="${u.id}" aria-label="Supprimer">×</button></div>
+      <small class="muted">${esc(u.email || "")} · vu ${ago(u.last_seen)} · ${u.n_events} événement${u.n_events > 1 ? "s" : ""}, ${u.n_tasks} tâche${u.n_tasks > 1 ? "s" : ""}, ${u.n_acts} séance${u.n_acts > 1 ? "s" : ""}</small>
+      ${PERM_DEFS.map(([k, l]) => permRow((u.perms || {})[k] !== false, `data-act="perm-toggle" data-id="${u.id}" data-k="${k}"`, l)).join("")}
+      <div class="btn-line"><button class="btn small ${u.status === "blocked" ? "primary" : "danger"}" data-act="usr-status" data-id="${u.id}" data-s="${u.status === "blocked" ? "active" : "blocked"}">${u.status === "blocked" ? "Rétablir l'accès" : "Suspendre l'accès"}</button></div></div>`).join("");
+  const alertsHtml = (ad.alerts || []).length ? `<div class="card alertcard"><h3>⚠️ À surveiller</h3>${ad.alerts.map((x) => `<div class="al">${esc(x)}</div>`).join("")}</div>` : `<div class="card"><h3>✅ Tout va bien</h3><small class="muted">Synchros à jour · base de données : ${ad.db_mb ?? "?"} Mo sur 500 Mo.</small></div>`;
+  return `<div class="head"><div><h1>Administration</h1><div class="sub">Accès, invitations et droits</div></div><button class="btn small" data-act="admin-close">← Réglages</button></div>
+    ${alertsHtml}
+    ${pend.length ? `<div class="card"><h3>Demandes de compte (${pend.length})</h3><p class="muted">Ces personnes ont utilisé un lien d'invitation. Elles ne peuvent rien faire tant que tu n'as pas accepté.</p>${pendHtml}</div>` : ""}
     <div class="card"><h3>Inviter quelqu'un</h3>
-      <p class="muted">Crée un lien à envoyer. La personne choisit son prénom, son e-mail et son code, puis a son propre calendrier (sans Nelson ni Sophie). Le lien est valable 7 jours et ne sert qu'une fois.</p>
+      <p class="muted">Crée un lien à envoyer. La personne choisit son prénom, son e-mail et son code, puis tu valides sa demande ici avant qu'elle puisse entrer. Le lien est valable 7 jours et ne sert qu'une fois.</p>
       <input id="invLabel" maxlength="40" placeholder="Pour qui ? (juste pour toi, ex. Maman)" style="width:100%;margin-bottom:8px">
       ${PERM_DEFS.map(([k, l]) => permRow(dp[k] !== false, `data-act="inv-perm" data-k="${k}"`, l)).join("")}
       <div class="btn-line"><button class="btn small primary" data-act="inv-create">Créer le lien d'invitation</button></div>
       ${invs ? `<h4 class="subh">Invitations en attente</h4>${invs}` : ""}</div>
-    <div class="card"><h3>Profils invités</h3>
+    <div class="card"><h3>Profils invités et accès</h3>
       <p class="muted">Ce que chacun peut utiliser. Chacun ne voit que ses propres données ; seuls Nelson et Sophie partagent le calendrier commun.</p>
       ${users || `<div class="empty">Aucun profil invité pour l'instant.</div>`}</div>`;
 }
@@ -1087,7 +1113,8 @@ function viewSettings() {
     ? (isAdmin ? `<div class="card"><h3>Connexion</h3>
         <p class="muted">Chacun se connecte avec son e-mail et un code numérique. Pour Sophie : envoie-lui l'adresse de l'appli ; elle saisit son e-mail et son code (indice affiché : « devine »). Son e-mail est enregistré à sa première connexion. Après 5 erreurs, la connexion est bloquée 15 minutes.</p>
         <div class="btn-line"><button class="btn small" data-act="copy-app">Copier l'adresse de l'appli</button></div></div>`
-      : `<div class="card"><h3>Ton espace</h3><p class="muted">Tu es connecté(e) avec ton e-mail et ton code. Ne les partage pas : ils donnent accès à ton calendrier.</p></div>`)
+      : `<div class="card"><h3>Ton espace</h3><p class="muted">Tu es connecté(e) avec ton e-mail et ton code. Ne les partage pas : ils donnent accès à ton calendrier.</p>
+        ${!isPair(me) ? `<h4 class="subh">Tes accès</h4>${PERM_DEFS.map(([k, l]) => `<div class="acc ${permOff(k) ? "off" : "on"}"><span>${l}</span><b>${permOff(k) ? "⛔ Désactivé par l'admin" : "✓ Activé"}</b></div>`).join("")}${PERM_DEFS.some(([k]) => permOff(k)) ? `<small class="muted">Pour activer une fonction désactivée, demande à Nelson.</small>` : ""}` : ""}</div>`)
     : `<div class="card"><h3>Mode sur ce téléphone</h3><p class="muted">Données enregistrées sur cet appareil uniquement.</p></div>`;
   return `
     <div class="head"><div><h1>Réglages</h1><div class="sub">Personnalise ton espace</div></div></div>
@@ -1256,6 +1283,20 @@ document.addEventListener("click", (ev) => {
       if (!confirm("Annuler cette invitation ? Le lien ne fonctionnera plus.")) break;
       rpc("revoke_invite", { p_token: token, p_code: el.dataset.code }).then(() => { toast("Invitation annulée"); loadAdmin(); }).catch(() => toast("Action impossible"));
       break;
+    case "ban-x": (ui.banDis || (ui.banDis = {}))[el.dataset.k] = true; render(); break;
+    case "admin-open-tab": ui.tab = "settings"; ui.admin = true; render(true); loadAdmin(); break;
+    case "acc-ok": case "acc-no": {
+      const u = (state.admin?.users || []).find((x) => x.id === el.dataset.id); if (!u) break;
+      const ok = act === "acc-ok"; if (!ok && !confirm(`Refuser la demande de ${u.name} ? Elle sera supprimée.`)) break;
+      rpc("decide_profile", { p_token: token, p_id: u.id, p_ok: ok }).then(() => { toast(ok ? `${u.name} peut maintenant se connecter` : "Demande refusée"); loadAdmin(); }).catch(() => toast("Action impossible"));
+      break;
+    }
+    case "usr-status": {
+      const u = (state.admin?.users || []).find((x) => x.id === el.dataset.id); if (!u) break;
+      if (el.dataset.s === "blocked" && !confirm(`Suspendre l'accès de ${u.name} ? Elle sera déconnectée (ses données sont gardées).`)) break;
+      rpc("set_status", { p_token: token, p_id: u.id, p_status: el.dataset.s }).then(() => { toast(el.dataset.s === "blocked" ? "Accès suspendu" : "Accès rétabli"); loadAdmin(); }).catch(() => toast("Action impossible"));
+      break;
+    }
     case "perm-toggle": {
       const u = (state.admin?.users || []).find((x) => x.id === el.dataset.id); if (!u) break;
       u.perms = { ...u.perms, [el.dataset.k]: u.perms[el.dataset.k] === false }; render();
@@ -1479,7 +1520,8 @@ document.addEventListener("click", (ev) => {
       if (p1 !== p2) { err.textContent = "Les deux codes ne sont pas identiques."; break; }
       el.disabled = true;
       rpc("claim_invite", { p_code: INVITE, p_name: nm, p_email: em, p_pin: p1 }).then((r) => {
-        if (r?.token) { try { localStorage.setItem(TOKEN_KEY, r.token); } catch (e) {} location.replace(location.pathname); }
+        if (r?.pending) { $(".login-box").innerHTML = `<h1>iwi2me</h1><p>✅ <b>Demande envoyée.</b></p><p class="muted">Ton compte doit être validé par Nelson. Dès que c'est fait, tu pourras te connecter avec ton e-mail et ton code.</p><p style="margin-top:14px"><a href="${location.pathname}">Aller à la connexion</a></p>`; }
+        else if (r?.token) { try { localStorage.setItem(TOKEN_KEY, r.token); } catch (e) {} location.replace(location.pathname); }
         else { err.textContent = r?.error || "Création impossible."; el.disabled = false; }
       }).catch(() => { err.textContent = "Création impossible, vérifie ta connexion internet."; el.disabled = false; });
       break;
@@ -1606,7 +1648,7 @@ function importData(file) {
 render();
 
 // Charge les données du profil, puis rafraîchit régulièrement (pour voir ce que l'autre ajoute)
-let lastSnap = "";
+let lastSnap = "", lastPing = 0, lastAdm = 0;
 const dedup = new Set(); // jours déjà nettoyés (évite de réessayer en boucle hors connexion)
 async function pull() {
   if (inflight) return;
@@ -1617,6 +1659,9 @@ async function pull() {
     const snap = JSON.stringify(d);
     me = d.me.id; isAdmin = !!d.me.admin; gShared = !!d.me.gcal_shared; hevyOn = !!d.me.hevy; hevySyncAt = d.me.hevy_sync || null;
     const first = !loaded;
+    if (Date.now() - lastPing > 300000) { lastPing = Date.now(); rpc("ping", { p_token: token }).catch(() => {}); }
+    if (isAdmin && (first || Date.now() - lastAdm > 180000)) { lastAdm = Date.now(); loadAdmin(true); }
+    const prevPerms = state.perms || {};
     if (snap !== lastSnap) {
       lastSnap = snap;
       const typing = sheet.open || document.activeElement?.matches?.("input, select"); // ne pas casser une saisie en cours
@@ -1625,6 +1670,7 @@ async function pull() {
       // un % pas encore sauvegardé garde SA valeur locale (ma part), le reste vient de la base
       state.tasks = d.tasks.map((t) => { const l = loc.get(t.id); return l ? Object.assign({}, t, { [myField(t)]: l[myField(t)] }) : t; });
       fixColors(state.profiles);
+      if (!first) PERM_DEFS.forEach(([k, l]) => { if (prevPerms[k] !== false && (state.perms || {})[k] === false) toast(`L'admin a désactivé « ${l.replace(/^\S+\s/, "")} » pour ton profil`); });
       try { localStorage.setItem(CACHE_KEY, snap); } catch (e) {}
       loaded = true;
       if (first || !typing) render();
@@ -1658,7 +1704,14 @@ function startCloud() {
       }
     } catch (e) {}
   });
-  setInterval(() => { if (!document.hidden) pull(); }, 20000);
+  // Rafraîchissement adaptatif : 20 s si on utilise l'appli, puis 1 min, puis 3 min si rien ne bouge (moins de consommation)
+  let lastAct = Date.now();
+  ["pointerdown", "keydown", "touchstart"].forEach((ev) => addEventListener(ev, () => { lastAct = Date.now(); }, { passive: true }));
+  (function loop() {
+    const idle = Date.now() - lastAct, delay = idle < 120000 ? 20000 : idle < 600000 ? 60000 : 180000;
+    setTimeout(() => { if (!document.hidden) pull(); loop(); }, delay);
+  })();
+  addEventListener("focus", () => pull());
   document.addEventListener("visibilitychange", () => { if (!document.hidden) pull(); });
 }
 

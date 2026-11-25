@@ -1005,3 +1005,153 @@ begin
 end $$;
 
 revoke all on function _perm(profiles, text) from public;
+
+-- ============ Migration 16 : validation des comptes par l'admin, surveillance, admin enrichie ============
+alter table profiles add column if not exists status text not null default 'active';
+alter table profiles drop constraint if exists profiles_status_check;
+alter table profiles add constraint profiles_status_check check (status in ('active','pending','blocked'));
+alter table profiles add column if not exists last_login timestamptz;
+alter table profiles add column if not exists last_seen timestamptz;
+alter table profiles add column if not exists requested_at timestamptz;
+
+-- un compte en attente ou suspendu ne peut plus rien faire, même avec un jeton
+create or replace function _me(p_token uuid) returns profiles
+language sql stable security definer set search_path = public as $$
+  select * from profiles where token = p_token and status = 'active' limit 1;
+$$;
+
+create or replace function login(p_email text, p_pin text) returns json
+language plpgsql security definer set search_path = public, extensions as $$
+declare p profiles; em text := lower(trim(coalesce(p_email, ''))); th login_throttle; kk text; nf int; lim int;
+begin
+  if p_pin is null or p_pin !~ '^[0-9]{4,12}$' then p_pin := ''; end if;   -- non numérique : jamais accepté
+  select * into p from profiles where lower(email) = em and pin_hash is not null;
+  kk := coalesce(p.id, '*nouveau');
+  lim := case when kk in ('*nouveau', 'sophie') then 10 else 5 end;   -- 10 essais pour la 1re connexion / Sophie, 5 sinon
+  select * into th from login_throttle where k = kk;
+  if th.locked_until is not null and th.locked_until > now() then
+    return json_build_object('error', 'Trop de tentatives, réessaie dans 15 minutes.');
+  end if;
+  if p_pin <> '' and p.id is null and em like '%@%' then
+    select * into p from profiles where email is null and pin_hash is not null and pin_hash = crypt(p_pin, pin_hash) limit 1;
+    if p.id is not null then update profiles set email = em where id = p.id; end if;
+  elsif p.id is not null and (p_pin = '' or p.pin_hash <> crypt(p_pin, p.pin_hash)) then
+    p := null;
+  end if;
+  if p.id is null then
+    nf := case when th.k is null or (th.locked_until is not null and th.locked_until <= now()) then 1 else th.fails + 1 end;
+    insert into login_throttle(k, fails, locked_until) values (kk, nf, case when nf >= lim then now() + interval '15 minutes' end)
+      on conflict (k) do update set fails = excluded.fails, locked_until = excluded.locked_until;
+    return json_build_object('error', 'E-mail ou code incorrect.');
+  end if;
+  delete from login_throttle where k = kk;
+  if p.status = 'pending' then return json_build_object('error', 'Ton compte attend la validation de l''admin.'); end if;
+  if p.status = 'blocked' then return json_build_object('error', 'Ton accès a été suspendu.'); end if;
+  update profiles set last_login = now(), last_seen = now() where id = p.id;
+  return json_build_object('token', p.token, 'id', p.id);
+end $$;
+
+create or replace function claim_invite(p_code uuid, p_name text, p_email text, p_pin text) returns json
+language plpgsql security definer set search_path = public, extensions as $$
+declare inv invites; np profiles; nm text := left(trim(coalesce(p_name, '')), 24); em text := lower(trim(coalesce(p_email, ''))); pid text; pal text[] := array['#4DB8FF','#FF7AC8','#FFD54D','#B28CFF','#5EEAD4','#FF9F6B']; n int;
+begin
+  select * into inv from invites where code = p_code and used_by is null and expires_at > now() for update;
+  if inv.code is null then return json_build_object('error', 'Ce lien d''invitation n''est plus valide.'); end if;
+  if char_length(nm) < 2 then return json_build_object('error', 'Saisis ton prénom.'); end if;
+  if em !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then return json_build_object('error', 'E-mail invalide.'); end if;
+  if coalesce(p_pin, '') !~ '^[0-9]{6,12}$' then return json_build_object('error', 'Le code doit faire 6 à 12 chiffres.'); end if;
+  if exists (select 1 from profiles where lower(email) = em) then return json_build_object('error', 'Cet e-mail a déjà un compte : connecte-toi.'); end if;
+  pid := coalesce(nullif(regexp_replace(lower(nm), '[^a-z0-9]', '', 'g'), ''), 'user') || '-' || substr(md5(random()::text), 1, 5);
+  select count(*) into n from profiles;
+  insert into profiles(id, name, color, email, pin_hash, perms, status, requested_at) values (pid, nm, pal[1 + n % 6], em, crypt(p_pin, gen_salt('bf')), inv.perms, 'pending', now()) returning * into np;
+  update invites set used_by = np.id where code = inv.code;
+  return json_build_object('pending', true, 'id', np.id);
+end $$;
+
+create or replace function ping(p_token uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then return; end if;
+  update profiles set last_seen = now() where id = me.id and (last_seen is null or last_seen < now() - interval '5 minutes');
+end $$;
+
+-- Accepter (active) ou refuser (supprime la demande)
+create or replace function decide_profile(p_token uuid, p_id text, p_ok boolean) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null or not me.is_admin or _is_pair(p_id) then raise exception 'interdit'; end if;
+  if coalesce(p_ok, false) then update profiles set status = 'active' where id = p_id and status = 'pending';
+  else delete from profiles where id = p_id and status = 'pending'; end if;
+end $$;
+
+-- Suspendre / rétablir un accès
+create or replace function set_status(p_token uuid, p_id text, p_status text) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null or not me.is_admin or _is_pair(p_id) or p_status not in ('active','blocked') then raise exception 'interdit'; end if;
+  update profiles set status = p_status where id = p_id and status in ('active','blocked');
+end $$;
+
+create or replace function get_admin(p_token uuid) returns json
+language plpgsql stable security definer set search_path = public as $$
+declare me profiles := _me(p_token); al jsonb := '[]'::jsonb; np int; r record; mb numeric;
+begin
+  if me.id is null or not me.is_admin then raise exception 'réservé à l''admin'; end if;
+  select count(*) into np from profiles where status = 'pending';
+  if np > 0 then al := al || jsonb_build_array(np || ' demande(s) de compte à valider'); end if;
+  for r in select p.name, k.synced_at from hevy_keys k join profiles p on p.id = k.profile_id where k.synced_at is null or k.synced_at < now() - interval '36 hours' loop
+    al := al || jsonb_build_array('Synchro Hevy ancienne ou jamais faite pour ' || r.name);
+  end loop;
+  for r in select p.name, k.provider from watch_keys k join profiles p on p.id = k.profile_id where (k.refresh_token is not null or k.api_key is not null) and (k.synced_at is null or k.synced_at < now() - interval '36 hours') loop
+    al := al || jsonb_build_array('Synchro ' || r.provider || ' ancienne pour ' || r.name);
+  end loop;
+  mb := round(pg_database_size(current_database()) / 1048576.0, 1);
+  if mb > 400 then al := al || jsonb_build_array('Base de données à ' || mb || ' Mo sur 500 Mo (plan gratuit)'); end if;
+  return json_build_object(
+    'alerts', al, 'db_mb', mb,
+    'users', coalesce((select json_agg(json_build_object('id', p.id, 'name', p.name, 'color', p.color, 'perms', p.perms, 'created', p.created_at, 'status', p.status,
+                         'email', p.email, 'last_login', p.last_login, 'last_seen', p.last_seen, 'requested', p.requested_at,
+                         'n_events', (select count(*) from events e where e.owner = p.id), 'n_tasks', (select count(*) from tasks t where t.owner = p.id),
+                         'n_acts', (select count(*) from activities a where a.profile_id = p.id) + (select count(*) from workouts w where w.profile_id = p.id)) order by p.created_at)
+                       from profiles p where not _is_pair(p.id)), '[]'::json),
+    'invites', coalesce((select json_agg(json_build_object('code', code, 'label', label, 'perms', perms, 'expires', expires_at, 'used_by', used_by) order by created_at desc)
+                         from invites where used_by is null and expires_at > now()), '[]'::json));
+end $$;
+
+-- get_data : seuls les profils actifs apparaissent
+create or replace function _profiles_visible(me profiles) returns json
+language sql stable security definer set search_path = public as $$
+  select coalesce(json_agg(json_build_object('id',id,'name',name,'color',color,'admin',is_admin,'links',links) order by created_at), '[]'::json)
+  from profiles where status = 'active' and (me.is_admin or id = me.id or (_is_pair(me.id) and _is_pair(id)));
+$$;
+
+create or replace function get_data(p_token uuid) returns json
+language plpgsql stable security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  return json_build_object(
+    'me', json_build_object('id', me.id, 'name', me.name, 'admin', me.is_admin, 'gcal_shared', me.gcal_shared,
+                            'hevy', exists(select 1 from hevy_keys where profile_id = me.id),
+                            'hevy_sync', (select synced_at from hevy_keys where profile_id = me.id)),
+    'profiles', _profiles_visible(me),
+    'events', coalesce((select json_agg(json_build_object('id',id,'title',title,'date',date,'time',time,'owner',owner,'scope',scope,'meta',meta))
+                        from events where owner = me.id or (scope = 'commun' and _is_pair(me.id))), '[]'::json),
+    'tasks',  coalesce((select json_agg(json_build_object('id',id,'title',title,'period',period,'key',key,'progress',progress,'progress_b',progress_b,'owner',owner,'scope',scope))
+                        from tasks  where owner = me.id or (scope = 'commun' and _is_pair(me.id))), '[]'::json),
+    'gcal',   coalesce((select json_agg(json_build_object('id',g.id,'title',g.title,'date',g.date,'time',g.time,'owner',g.owner))
+                        from gcal_events g join profiles pr on pr.id = g.owner
+                        where _is_pair(me.id) and _is_pair(g.owner) and (g.owner = me.id or pr.gcal_shared)), '[]'::json),
+    'workouts', coalesce((select json_agg(json_build_object('id',w.id,'owner',w.profile_id,'title',w.title,'day',w.day,'start',w.start_time,'end',w.end_time,'sets',w.n_sets,'vol',w.volume,'ex',w.ex) order by w.start_time desc)
+                        from workouts w
+                        where w.day >= current_date - 400 and (w.profile_id = me.id or (_is_pair(me.id) and _is_pair(w.profile_id)))), '[]'::json)
+  );
+end $$;
+
+revoke all on function ping(uuid), decide_profile(uuid,text,boolean), set_status(uuid,text,text), get_admin(uuid), _profiles_visible(profiles), login(text,text), claim_invite(uuid,text,text,text) from public;
+grant execute on function ping(uuid), decide_profile(uuid,text,boolean), set_status(uuid,text,text), get_admin(uuid), login(text,text), claim_invite(uuid,text,text,text) to anon, authenticated;
+
+revoke all on function get_data(uuid) from public; grant execute on function get_data(uuid) to anon, authenticated;

@@ -5,7 +5,7 @@
   --bg: #130A33;                 /* ciel de l'illustration */
   --card: #21104A;
   --text: #F4ECFF;
-  --muted: #A596CC;
+  --muted: #C4B8E6;
   --line: rgba(255,255,255,.08);
   --accent: #A45CFF;
   --orange: #FF8A3D;
@@ -504,3 +504,18 @@ button.chk { cursor: pointer; }
 #spotNelson { --ring: #FF8A3D; --ring-soft: rgba(255,138,61,.18); }
 #spotSophie { --ring: #3DDC97; --ring-soft: rgba(61,220,151,.18); }
 .spot.active .tag { background: var(--ring); color: #1a0d40; }
+
+/* Contraste et clavier */
+:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+.card h3, .head .sub, .muted { color: #CFC5EC; }
+.alertcard { border-color: rgba(255,170,60,.6); background: rgba(255,170,60,.1); }
+.al { padding: 6px 0; font-size: 14px; }
+.usr.blocked { opacity: .65; }
+.banner { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 12px 14px; margin-bottom: 12px; border-radius: 16px; background: var(--accent-soft); border: 1.5px solid var(--accent); }
+.banner.warn { background: rgba(255,170,60,.14); border-color: rgba(255,170,60,.7); }
+.banner small { display: block; color: #E4DCF7; font-size: 13px; margin-top: 2px; }
+.banner .bb { display: flex; gap: 6px; align-items: center; flex: none; }
+.banner .x { width: 30px; height: 30px; border-radius: 50%; background: rgba(255,255,255,.12); color: #fff; font-size: 18px; line-height: 1; }
+.mbar.slim { height: 6px; margin: 2px 0 8px; }
+.acc { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; font-size: 14px; border-bottom: 1px solid var(--line); }
+.acc.off b { color: #FF9AA6; } .acc.on b { color: #3DDC97; }
