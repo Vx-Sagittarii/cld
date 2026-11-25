@@ -95,6 +95,7 @@ const canSee = (it) => it.scope === "commun" ? isPair(me) : it.owner === me;
 const passes = (it) => canSee(it) && (ui.filter === "all" || (ui.filter === "commun") === (it.scope === "commun"));
 const colorOf = (it) => it.scope === "commun" ? (document.body.classList.contains("noel") ? "#FF5A6E" : COMMUN_COLOR) : (prof(it.owner)?.color || "#A45CFF");
 // Avancement d'une tâche : en commun, moyenne de Nelson (progress) et Sophie (progress_b)
+const pendingProg = new Map(); // % modifiés mais pas encore sauvegardés
 const tp = (t) => t.scope === "commun" ? Math.round((t.progress + (t.progress_b || 0)) / 2) : t.progress;
 const labelOf = (it) => it.scope === "commun" ? "Commun" : (prof(it.owner)?.name || "?");
 
@@ -544,6 +545,7 @@ function viewTasks() {
           ${two ? [["nelson", "a", t.progress], ["sophie", "b", t.progress_b || 0]].map(([id, w, v]) => `
             <div class="who"><span style="color:${prof(id)?.color}">${esc(prof(id)?.name || id)}</span><span class="pct" data-w="${w}">${v}%</span></div>${sl(v, w === "b" ? "b" : "a", prof(id)?.color)}`).join("")
             : sl(t.progress, "a", colorOf(t))}
+          <button class="btn small save-prog" data-act="save-prog" data-id="${t.id}" ${pendingProg.has(t.id) ? "" : "hidden"}>Sauvegarder</button>
         </div>`; }).join("") || `<div class="empty">Ajoute une première tâche.</div>`}
       <button class="add-btn" data-act="new-task">+ Ajouter une tâche</button>
     </div>`;
@@ -643,6 +645,13 @@ function viewSettings() {
 const sheet = $("#sheet"), sheetForm = $("#sheetForm");
 // Champ « Pour » : Nelson et Sophie peuvent remplir à la place de l'autre, ou pour le commun.
 // Les autres profils n'ont pas le choix : tout va dans leur propre calendrier.
+// Tâche : privé (juste moi) ou public (Nelson + Sophie = commun)
+const visField = () => isPair(me)
+  ? `<div class="field"><label>Visibilité</label><select id="fVis">
+      <option value="perso" ${ui.filter === "commun" ? "" : "selected"}>Privé (juste moi)</option>
+      <option value="commun" ${ui.filter === "commun" ? "selected" : ""}>Public (${esc(prof("nelson").name)} + ${esc(prof("sophie").name)})</option>
+    </select></div>`
+  : "";
 const scopeField = (forId) => isPair(me)
   ? `<div class="field"><label>Pour</label><select id="fScope">
       <option value="nelson" ${(forId || (ui.filter === "commun" ? "commun" : me)) === "nelson" ? "selected" : ""}>${esc(prof("nelson").name)}</option>
@@ -715,7 +724,7 @@ function openTaskSheet() {
     <div class="two">
       <div class="field"><label>Période</label><select id="fPeriod">${Object.keys(labels).map((p) => `<option value="${p}" ${p === ui.period ? "selected" : ""}>${labels[p]}</option>`).join("")}</select></div>
     </div>
-    ${scopeField()}
+    ${visField()}
     <div class="actions"><button type="button" class="btn" data-act="close">Annuler</button><button type="button" class="btn primary" data-act="save-task">Ajouter</button></div>
   </div>`;
   sheet.showModal();
@@ -766,13 +775,18 @@ document.addEventListener("click", (ev) => {
       const title = $("#fTitle").value.trim();
       if (!title) { $("#fTitle").focus(); return; }
       const period = $("#fPeriod").value;
-      const f = readFor();
+      const f = $("#fVis") && $("#fVis").value === "commun" ? { owner: me, scope: "commun" } : { owner: me, scope: "perso" };
       const tk = { id: uid(), title, period, key: periodKey(period, fromISO(ui.selected)), ...f, progress: 0, progress_b: 0 };
       state.tasks.push(tk); push("upsert_task", tkArgs(tk));
       save(); sheet.close(); ui.period = period; render(); notifyFor(f); break;
     }
     case "del-event": state.events = state.events.filter((e) => e.id !== el.dataset.id); push("delete_event", { p_id: el.dataset.id }); save(); render(); break;
     case "del-task": state.tasks = state.tasks.filter((t) => t.id !== el.dataset.id); push("delete_task", { p_id: el.dataset.id }); save(); render(); break;
+    case "save-prog": {
+      const t = state.tasks.find((x) => x.id === el.dataset.id);
+      if (t) { pendingProg.delete(t.id); save(); push("upsert_task", tkArgs(t)); el.hidden = true; toast("Avancement sauvegardé"); }
+      break;
+    }
     case "push-on": pushOn(); break;
     case "push-off": pushOff(); break;
     case "gcal-connect": connectGoogle(false); break;
@@ -840,6 +854,7 @@ document.addEventListener("input", (ev) => {
     const card = el.closest(".task");
     const pc = card.querySelector(`.pct[data-w="${w}"]`); if (pc) pc.textContent = val + "%";
     card.classList.toggle("done", tp(t) >= 100);
+    pendingProg.set(t.id, true); card.querySelector(".save-prog").hidden = false;
     // Recalcule le cercle global
     const key = periodKey(ui.period, fromISO(ui.selected));
     const list = state.tasks.filter((x) => x.period === ui.period && x.key === key && passes(x));
@@ -850,11 +865,6 @@ document.addEventListener("input", (ev) => {
   if (el.dataset.pname) { const p = prof(el.dataset.pname); if (p) p.name = el.value.trim() || p.name; }
 });
 document.addEventListener("change", (ev) => {
-  if (ev.target.dataset.act === "slide") {
-    save();
-    const t = state.tasks.find((x) => x.id === ev.target.dataset.id);
-    if (t) push("upsert_task", tkArgs(t));
-  }
   if (ev.target.dataset.pname) { save(); push("rename_profile", { p_id: ev.target.dataset.pname, p_name: prof(ev.target.dataset.pname).name }); }
   if (ev.target.id === "importFile") importData(ev.target.files[0]);
 });
@@ -942,7 +952,8 @@ async function pull() {
     if (snap !== lastSnap) {
       lastSnap = snap;
       const typing = sheet.open || document.activeElement?.matches?.("input, select"); // ne pas casser une saisie en cours
-      state.profiles = d.profiles; state.events = d.events; state.tasks = d.tasks; fixColors(state.profiles);
+      const keep = new Map(state.tasks.filter((t) => pendingProg.has(t.id)).map((t) => [t.id, t]));
+      state.profiles = d.profiles; state.events = d.events; state.tasks = d.tasks.map((t) => keep.get(t.id) || t); fixColors(state.profiles);
       try { localStorage.setItem(CACHE_KEY, snap); } catch (e) {}
       loaded = true;
       if (first || !typing) render();
