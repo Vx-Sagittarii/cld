@@ -384,3 +384,14 @@ body.login .tabbar, body.login #fab, body.login .fab { display: none !important;
 .g-go { color: var(--muted); font-size: 22px; }
 .task.flash { animation: flash 1.6s ease; }
 @keyframes flash { 0%, 60% { box-shadow: 0 0 0 3px var(--accent); border-radius: 14px; } 100% { box-shadow: 0 0 0 0 transparent; } }
+
+/* Décembre : jour sélectionné toujours bien allumé (vert, rouge, ouvert) */
+.advent-grid .day.door.sel,
+.advent-grid .day.door.odd.sel,
+.advent-grid .day.door.open.sel,
+.advent-grid .day.door.eve.sel {
+  background: linear-gradient(135deg, #E23B4E, #FF8A3D);
+  color: #fff;
+  border-color: #FFE08A;
+  box-shadow: 0 6px 18px rgba(226,59,78,.55), 0 0 14px rgba(255,138,61,.45);
+}
