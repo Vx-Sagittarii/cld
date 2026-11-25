@@ -1,18 +1,19 @@
 /* Thème clair, épuré, moderne.
    Les couleurs sont des variables : change-les ici et tout l'appli suit. */
 :root {
-  --bg: #F6F7FB;
+  --bg: #FBF7FF;
   --card: #FFFFFF;
-  --text: #1E2330;
-  --muted: #8A91A5;
-  --line: #E8EBF3;
-  --accent: #6C7CFF;
-  --accent-soft: #ECEEFF;
-  --me: #6C7CFF;        /* toi */
-  --partner: #FF8FA8;   /* ton/ta partenaire */
-  --shared: #3CC4A4;    /* à deux */
+  --text: #2A1B3D;
+  --muted: #9A8BB0;
+  --line: #F0E8F8;
+  --accent: #8B45D9;
+  --orange: #FF8A3D;
+  --accent-soft: #F3E8FD;
+  --me: #8B45D9;        /* toi */
+  --partner: #FF8A3D;   /* ton/ta partenaire */
+  --shared: #E8478C;    /* à deux */
   --radius: 18px;
-  --shadow: 0 6px 24px rgba(40, 52, 110, 0.07);
+  --shadow: 0 8px 28px rgba(110, 50, 170, 0.10);
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -48,9 +49,9 @@ main {
 .grid { row-gap: 4px; }
 .day { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
   border-radius: 14px; font-size: 15px; position: relative; }
-.day.out { color: #C3C8D6; }
+.day.out { color: #CDBEE0; }
 .day.today { font-weight: 700; color: var(--accent); }
-.day.sel { background: var(--accent); color: #fff; box-shadow: 0 6px 16px rgba(108,124,255,.35); }
+.day.sel { background: linear-gradient(135deg, var(--accent), var(--orange)); color: #fff; box-shadow: 0 6px 16px rgba(139,69,217,.38); }
 .dots { display: flex; gap: 3px; height: 5px; margin-top: 3px; }
 .dot { width: 5px; height: 5px; border-radius: 50%; }
 .day.sel .dot { box-shadow: 0 0 0 1px rgba(255,255,255,.9); }
@@ -64,7 +65,7 @@ main {
 .row .t b { display: block; font-weight: 600; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row .t small { color: var(--muted); font-size: 12px; }
 .row .time { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.del { color: #C3C8D6; font-size: 20px; padding: 4px 8px; }
+.del { color: #CDBEE0; font-size: 20px; padding: 4px 8px; }
 .empty { color: var(--muted); font-size: 14px; padding: 6px 0; }
 .add-btn { width: 100%; margin-top: 8px; padding: 12px; border-radius: 14px; background: var(--accent-soft);
   color: var(--accent); font-weight: 600; }
@@ -76,13 +77,13 @@ main {
 .sport b { color: var(--text); display: block; font-size: 14px; }
 
 /* ---------- Tâches ---------- */
-.seg { display: grid; grid-template-columns: repeat(4, 1fr); background: #E9ECF5; border-radius: 14px; padding: 4px; margin-bottom: 14px; }
+.seg { display: grid; grid-template-columns: repeat(4, 1fr); background: #F0E8F8; border-radius: 14px; padding: 4px; margin-bottom: 14px; }
 .seg button { padding: 9px 0; border-radius: 11px; font-size: 14px; font-weight: 600; color: var(--muted); }
-.seg button.on { background: var(--card); color: var(--text); box-shadow: 0 2px 8px rgba(40,52,110,.1); }
+.seg button.on { background: var(--card); color: var(--text); box-shadow: 0 2px 8px rgba(110,50,170,.14); }
 
 .overall { display: flex; align-items: center; gap: 16px; }
 .ring { --p: 0; width: 72px; height: 72px; border-radius: 50%; flex: none;
-  background: conic-gradient(var(--accent) calc(var(--p) * 1%), var(--accent-soft) 0);
+  background: conic-gradient(from 0deg, var(--accent), var(--orange) calc(var(--p) * 1%), var(--accent-soft) 0);
   display: grid; place-items: center; }
 .ring span { width: 56px; height: 56px; border-radius: 50%; background: var(--card);
   display: grid; place-items: center; font-weight: 700; font-size: 16px; }
@@ -99,7 +100,7 @@ main {
 
 /* Curseur de progression : la partie remplie suit --v */
 input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 8px; border-radius: 8px; outline: none;
-  background: linear-gradient(to right, var(--c, var(--accent)) calc(var(--v, 0) * 1%), #E9ECF5 0); }
+  background: linear-gradient(to right, var(--c, var(--accent)) calc(var(--v, 0) * 1%), #F0E8F8 0); }
 input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 24px; border-radius: 50%;
   background: #fff; border: 3px solid var(--c, var(--accent)); box-shadow: 0 2px 8px rgba(0,0,0,.15); }
 input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%;
@@ -123,18 +124,87 @@ dialog::backdrop { background: rgba(30, 35, 48, .35); }
 .field { margin-bottom: 14px; }
 .field label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .05em; }
 .field input[type=text], .field input[type=date], .field input[type=time], .field select {
-  width: 100%; padding: 13px 14px; border-radius: 14px; border: 1.5px solid var(--line); background: #FAFBFE; font-size: 16px; outline: none; }
+  width: 100%; padding: 13px 14px; border-radius: 14px; border: 1.5px solid var(--line); background: #FCF9FF; font-size: 16px; outline: none; }
 .field input:focus, .field select:focus { border-color: var(--accent); background: #fff; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .actions { display: flex; gap: 10px; margin-top: 18px; }
-.btn { flex: 1; padding: 14px; border-radius: 14px; font-weight: 700; background: #EEF0F7; }
-.btn.primary { background: var(--accent); color: #fff; box-shadow: 0 6px 16px rgba(108,124,255,.35); }
+.btn { flex: 1; padding: 14px; border-radius: 14px; font-weight: 700; background: #F3EAFB; }
+.btn.primary { background: linear-gradient(135deg, var(--accent), var(--orange)); color: #fff; box-shadow: 0 6px 16px rgba(139,69,217,.38); }
 
 /* ---------- Réglages ---------- */
 .set-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .set-row .dot-lg { width: 14px; height: 14px; border-radius: 50%; flex: none; }
-.set-row input { flex: 1; padding: 12px 14px; border-radius: 14px; border: 1.5px solid var(--line); background: #FAFBFE; font-size: 16px; outline: none; }
+.set-row input { flex: 1; padding: 12px 14px; border-radius: 14px; border: 1.5px solid var(--line); background: #FCF9FF; font-size: 16px; outline: none; }
 .muted { color: var(--muted); font-size: 13px; line-height: 1.5; }
 .btn-line { display: flex; gap: 10px; margin-top: 10px; }
 .btn.small { padding: 11px; font-size: 14px; }
 .btn.danger { color: #E0556B; background: #FFF0F2; }
+
+
+/* ===================== Ambiance : halos violet / orange ===================== */
+body {
+  background:
+    radial-gradient(520px 320px at 105% -40px, rgba(255,138,61,.16), transparent 70%),
+    radial-gradient(520px 340px at -10% 0, rgba(139,69,217,.13), transparent 70%),
+    var(--bg);
+  background-attachment: fixed;
+}
+.tab.on svg { filter: drop-shadow(0 3px 6px rgba(139,69,217,.35)); }
+
+/* ===================== Bandeau photo animé ===================== */
+.hero { position: relative; border-radius: 26px; overflow: hidden; aspect-ratio: 16 / 10; margin-bottom: 16px;
+  box-shadow: 0 18px 40px rgba(139,69,217,.30), 0 4px 12px rgba(255,138,61,.18);
+  cursor: zoom-in; isolation: isolate; transform: translateZ(0);
+  animation: heroIn .9s cubic-bezier(.2,.8,.2,1) both; }
+.hero.off { display: none; }
+/* La photo est dans un conteneur plus grand (parallaxe au défilement) */
+.hero-media { position: absolute; inset: -3% 0; will-change: transform; }
+.hero-media img { width: 100%; height: 100%; object-fit: cover; display: block;
+  }
+/* Voile de couleur + halos qui flottent */
+.hero::after { content: ""; position: absolute; inset: 0; z-index: 2; pointer-events: none;
+  background: linear-gradient(180deg, rgba(139,69,217,0) 70%, rgba(40,10,80,.35) 100%); }
+.blob { position: absolute; z-index: 1; width: 62%; aspect-ratio: 1; border-radius: 50%; filter: blur(34px);
+  mix-blend-mode: screen; opacity: .36; pointer-events: none; }
+.blob.b1 { background: radial-gradient(circle, #FF8A3D, transparent 68%); left: -18%; bottom: -30%; animation: drift1 11s ease-in-out infinite alternate; }
+.blob.b2 { background: radial-gradient(circle, #A45CFF, transparent 68%); right: -20%; top: -34%; animation: drift2 13s ease-in-out infinite alternate; }
+/* Reflet de lumière qui traverse la photo */
+.shine { position: absolute; inset: 0; z-index: 3; pointer-events: none;
+  background: linear-gradient(112deg, transparent 38%, rgba(255,255,255,.30) 50%, transparent 62%);
+  transform: translateX(-130%); animation: shine 7s ease-in-out 1.2s infinite; }
+/* Pastilles en verre dépoli */
+.chip-glass { position: absolute; z-index: 4; display: flex; align-items: center; gap: 6px; padding: 8px 13px; border-radius: 999px;
+  color: #fff; font-size: 13px; font-weight: 600; letter-spacing: .01em;
+  background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+.chip-glass.date { left: 14px; bottom: 14px; animation: bob 4.5s ease-in-out infinite alternate; }
+.chip-glass.zoom { right: 12px; bottom: 12px; padding: 5px 9px; font-size: 12px; animation: bob 5.5s ease-in-out .8s infinite alternate; }
+.chip-glass i { width: 8px; height: 8px; border-radius: 50%; background: var(--orange); box-shadow: 0 0 0 4px rgba(255,138,61,.35); animation: pulse 2s ease-in-out infinite; }
+
+@keyframes kenburns { from { transform: scale(1.03) translate(0, 0); } to { transform: scale(1.17) translate(-2.2%, -1.6%); } }
+@keyframes drift1 { from { transform: translate(0, 0) scale(1); } to { transform: translate(38%, -22%) scale(1.25); } }
+@keyframes drift2 { from { transform: translate(0, 0) scale(1.1); } to { transform: translate(-34%, 26%) scale(.9); } }
+@keyframes shine { 0% { transform: translateX(-130%); } 32%, 100% { transform: translateX(130%); } }
+@keyframes bob { from { transform: translateY(0); } to { transform: translateY(-5px); } }
+@keyframes pulse { 0%, 100% { box-shadow: 0 0 0 3px rgba(255,138,61,.35); } 50% { box-shadow: 0 0 0 7px rgba(255,138,61,0); } }
+@keyframes heroIn { from { opacity: 0; transform: translateY(18px) scale(.97); } to { opacity: 1; transform: none; } }
+
+/* Apparition en cascade des cartes quand on change d'onglet */
+.enter > * { animation: rise .55s cubic-bezier(.2,.8,.2,1) both; }
+.enter > *:nth-child(2) { animation-delay: .06s; } .enter > *:nth-child(3) { animation-delay: .12s; }
+.enter > *:nth-child(4) { animation-delay: .18s; } .enter > *:nth-child(5) { animation-delay: .24s; }
+@keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+.day.sel { animation: pop .3s cubic-bezier(.2,.8,.2,1); }
+@keyframes pop { from { transform: scale(.82); } to { transform: scale(1); } }
+
+/* ===================== Affiche en grand ===================== */
+#photo { margin: auto; width: min(94vw, 900px); max-width: none; }
+#photo::backdrop { background: rgba(35, 12, 60, .72); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+#photo img { width: 100%; display: block; border-radius: 22px; box-shadow: 0 30px 80px rgba(0,0,0,.5);
+  animation: zoomIn .4s cubic-bezier(.2,.8,.2,1); }
+@keyframes zoomIn { from { opacity: 0; transform: scale(.88); } to { opacity: 1; transform: none; } }
+
+/* Respect du réglage « réduire les animations » du téléphone */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

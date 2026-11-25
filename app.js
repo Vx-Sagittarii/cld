@@ -92,15 +92,18 @@ const ownerName = (o) => o === "me" ? state.settings.me : o === "partner" ? stat
 const ownerVar = (o) => o === "me" ? "var(--me)" : o === "partner" ? "var(--partner)" : "var(--shared)";
 const $ = (sel) => document.querySelector(sel);
 const view = $("#view");
+const hero = $("#hero");
 
 // ---------------------------------------------------------------
 // 4. VUES
 // ---------------------------------------------------------------
-function render() {
+function render(animate = false) {
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("on", t.dataset.tab === ui.tab));
   if (ui.tab === "cal") view.innerHTML = viewCalendar();
   else if (ui.tab === "tasks") view.innerHTML = viewTasks();
   else view.innerHTML = viewSettings();
+  view.classList.toggle("enter", animate);        // cascade d'apparition seulement au changement d'onglet
+  hero.classList.toggle("off", ui.tab !== "cal"); // le bandeau photo n'apparaît que sur le calendrier
 }
 
 // ----- Calendrier -----
@@ -274,7 +277,7 @@ function openTaskSheet() {
 document.addEventListener("click", (ev) => {
   const el = ev.target.closest("[data-act], .tab");
   if (!el) return;
-  if (el.classList.contains("tab")) { ui.tab = el.dataset.tab; render(); window.scrollTo(0, 0); return; }
+  if (el.classList.contains("tab")) { ui.tab = el.dataset.tab; render(true); window.scrollTo(0, 0); return; }
 
   const act = el.dataset.act;
   switch (act) {
@@ -365,7 +368,29 @@ function importData(file) {
 }
 
 // ---------------------------------------------------------------
-// 8. DÉMARRAGE
+// 8. BANDEAU PHOTO ANIMÉ
+// ---------------------------------------------------------------
+(function setupHero() {
+  // Parallaxe : la photo glisse un peu plus lentement que la page
+  const media = $("#heroMedia");
+  let ticking = false;
+  window.addEventListener("scroll", () => {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => {
+      media.style.transform = `translateY(${Math.min(window.scrollY * 0.08, 8)}px)`;
+      ticking = false;
+    });
+  }, { passive: true });
+
+  // Toucher le bandeau = voir l'affiche en grand (re-toucher pour fermer)
+  const dlg = $("#photo");
+  hero.addEventListener("click", () => dlg.showModal());
+  dlg.addEventListener("click", () => dlg.close());
+})();
+
+// ---------------------------------------------------------------
+// 9. DÉMARRAGE
 // ---------------------------------------------------------------
 render();
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {

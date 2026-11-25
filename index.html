@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>iwi2me</title>
-  <meta name="theme-color" content="#F6F7FB">
+  <meta name="theme-color" content="#FBF7FF">
   <link rel="manifest" href="manifest.webmanifest">
   <!-- iPhone : permet l'installation sur l'écran d'accueil en plein écran -->
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -16,7 +16,14 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <main id="view"></main>
+  <main>
+    <!-- Bandeau photo animé (hors de #view pour que l'animation ne redémarre pas à chaque clic) -->
+    <section class="hero" id="hero" aria-label="Illustration iwi2me, painting session">
+      <div class="hero-media" id="heroMedia"><img src="img/scene.svg" alt="Illustration anime : pique-nique de nuit au bord de l'eau, iwi2me painting session" decoding="async"></div>
+      <div class="chip-glass zoom">⤢</div>
+    </section>
+    <div id="view"></div>
+  </main>
 
   <nav class="tabbar" id="tabbar">
     <button data-tab="cal" class="tab">
@@ -34,6 +41,7 @@
   </nav>
 
   <!-- Feuille de saisie (ajout d'événement ou de tâche) -->
+  <dialog id="photo"><img src="img/scene.svg" alt="Illustration iwi2me, painting session"></dialog>
   <dialog id="sheet"><form method="dialog" id="sheetForm"></form></dialog>
 
   <script src="app.js"></script>
