@@ -673,8 +673,8 @@ function viewCalendar() {
     const inMonth = d.getMonth() === m.getMonth();
     // Événements du jour (titres dans la case) : journée entière d'abord, puis par heure
     const evd = EV.map((e) => inst(e, iso)).filter((e) => e && cpass(e)).sort(byWhoTime(iso));
-    // Pastille de tâche : seulement pour les tâches courtes (≤ 7 jours) ou fréquentes, sinon une tâche d'un an mettrait un point partout
-    const tcols = [...new Set(state.tasks.filter((t) => touches(t, fromISO(iso), fromISO(iso)) && cpass(t) && (tFreq(t) || (deadlineOf(t) - startOfTask(t)) / 864e5 <= 6)).map(colorOf))].slice(0, 3);
+    // Pastille de tâche : jour d'échéance, ou seulement pour les tâches courtes (≤ 7 jours) ou fréquentes, sinon une tâche d'un an mettrait un point partout
+    const tcols = [...new Set(state.tasks.filter((t) => touches(t, fromISO(iso), fromISO(iso)) && cpass(t) && (tFreq(t) || toISO(deadlineOf(t)) === iso || (deadlineOf(t) - startOfTask(t)) / 864e5 <= 6)).map(colorOf))].slice(0, 3);
     const bars = evd.slice(0, 3).map((e) => `<i class="eb" style="--c:${colorOf(e)}">${esc(e.title)}</i>`).join("");
     const more = evd.length > 3 ? `<small class="more">+${evd.length - 3}</small>` : "";
     const door = dec && inMonth && d.getDate() <= 25;
@@ -1406,26 +1406,34 @@ function openTaskSheet(edit) {
   sheetForm.innerHTML = `<div class="sheet">
     ${sheetTop(edit ? "Modifier la tâche" : "Nouvelle tâche", "save-task")}
     <div class="field"><label>Titre</label><input type="text" id="fTitle" value="${edit ? esc(edit.title) : ""}" placeholder="Réviser le code de la route" autocomplete="off"></div>
-    <div class="seg" id="tkMode"><button type="button" data-m="span">Période</button><button type="button" data-m="freq">Fréquent</button></div>
+    <div class="seg" id="tkMode"><button type="button" data-m="span">Échéance</button><button type="button" data-m="freq">Fréquence</button></div>
+    <small class="muted" id="tkHint"></small>
     <div class="tcard">
-      <div class="trow"><span id="lblFrom">Du</span><span class="dt"><input type="date" id="fDate" value="${d}"></span></div>
-      <div class="trow" id="rowEnd"><span>Au</span><span class="dt"><input type="date" id="fEnd" value="${e2}" min="${d}"></span></div>
+      <div class="trow"><span id="lblFrom">Pour le</span><span class="dt"><input type="date" id="fDate" value="${e2}"></span></div>
+      <div class="qks" id="qkDate"><button type="button" data-q="0">Aujourd'hui</button><button type="button" data-q="1">Demain</button><button type="button" data-q="7">Dans 1 semaine</button><button type="button" data-q="30">Dans 1 mois</button></div>
     </div>
-    <div class="wdays" id="rowDays" hidden>${WD.map((n, i) => `<button type="button" data-wd="${i}" class="${(tm.f || []).includes(i) ? "on" : ""}">${n}</button>`).join("")}</div>
+    <div id="rowDays" hidden><div class="qks" id="qkDays"><button type="button" data-qd="0,1,2,3,4,5,6">Tous les jours</button><button type="button" data-qd="0,1,2,3,4">En semaine</button><button type="button" data-qd="5,6">Week-end</button></div><div class="wdays">${WD.map((n, i) => `<button type="button" data-wd="${i}" class="${(tm.f || []).includes(i) ? "on" : ""}">${n}</button>`).join("")}</div></div>
     <div class="field"><label>Note</label><textarea id="fNote" rows="3" maxlength="600" placeholder="Détails, lien, ce qu'il faut penser à faire…">${esc(tm.n || "")}</textarea></div>
     <div class="tcard" id="remCard"><div class="trow"><span>🔔 Rappel</span><span class="dt"><input type="date" id="fRd" value="${tm.rd || ""}"><input type="time" id="fRt" class="tm" value="${tm.rt || ""}"></span></div></div>
     ${vis}
     ${edit ? `<button type="button" class="del-link" data-act="del-sheet" data-kind="task" data-id="${edit.id}">Supprimer la tâche</button>` : ""}
   </div>`;
   sheet.showModal();
-  const setMode = (m) => { // « Période » (du … au …) ou « Fréquent » (jours de la semaine, sans date de fin)
+  const setMode = (m) => { // « Échéance » (une date limite) ou « Fréquence » (jours de la semaine, répétés)
     sheetForm.dataset.mode = m; $("#tkMode").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.m === m));
-    $("#rowEnd").hidden = m === "freq"; $("#rowDays").hidden = m !== "freq"; $("#remCard").hidden = m === "freq"; $("#lblFrom").textContent = m === "freq" ? "À partir du" : "Du";
+    $("#rowDays").hidden = m !== "freq"; $("#remCard").hidden = m === "freq"; $("#qkDate").hidden = m === "freq";
+    $("#lblFrom").textContent = m === "freq" ? "À partir du" : "Pour le";
+    $("#tkHint").textContent = m === "freq" ? "Revient chaque semaine aux jours choisis." : "À faire avant cette date.";
   };
   setMode(edit && tFreq(edit) ? "freq" : "span");
+  if (edit && tFreq(edit)) $("#fDate").value = d; // en fréquence, la date = le début
   $("#tkMode").addEventListener("click", (ev) => { const b = ev.target.closest("button[data-m]"); if (b) setMode(b.dataset.m); });
-  $("#rowDays").addEventListener("click", (ev) => { const b = ev.target.closest("button[data-wd]"); if (b) b.classList.toggle("on"); });
-  $("#fDate").addEventListener("input", () => { const a = $("#fDate").value; $("#fEnd").min = a; if (a && (!$("#fEnd").value || $("#fEnd").value < a)) $("#fEnd").value = a; });
+  $("#rowDays").addEventListener("click", (ev) => {
+    const q = ev.target.closest("button[data-qd]"), b = ev.target.closest("button[data-wd]");
+    if (q) { const set = q.dataset.qd.split(","); $("#rowDays").querySelectorAll("button[data-wd]").forEach((x) => x.classList.toggle("on", set.includes(x.dataset.wd))); }
+    else if (b) b.classList.toggle("on");
+  });
+  $("#qkDate").addEventListener("click", (ev) => { const b = ev.target.closest("button[data-q]"); if (b) $("#fDate").value = toISO(addDays(new Date(), Number(b.dataset.q))); });
   if (!edit) setTimeout(() => $("#fTitle").focus(), 50);
 }
 
@@ -1646,9 +1654,12 @@ document.addEventListener("click", (ev) => {
       const title = $("#fTitle").value.trim();
       if (!title) { sheetErr("Donne un titre avant d'enregistrer."); $("#fTitle").focus(); return; }
       const freqOn = sheetForm.dataset.mode === "freq", days = [...document.querySelectorAll("#rowDays button.on")].map((b) => Number(b.dataset.wd));
-      const date = $("#fDate").value || ui.selected, endIn = freqOn ? date : ($("#fEnd").value || date);
+      const picked = $("#fDate").value || ui.selected;
       if (freqOn && !days.length) { sheetErr("Choisis au moins un jour de la semaine."); return; }
-      if (endIn < date) { sheetErr("La date de fin doit être après la date de début."); return; }
+      const oldT0 = sheetForm.dataset.edit ? state.tasks.find((x) => x.id === sheetForm.dataset.edit) : null;
+      // Échéance : pas de début à saisir. Début = celui de la tâche si on la modifie, sinon aujourd'hui (jamais après l'échéance)
+      const startRef = oldT0 && !tFreq(oldT0) ? toISO(startOfTask(oldT0)) : toISO(new Date());
+      const date = freqOn ? picked : (startRef < picked ? startRef : picked), endIn = picked;
       const { period, key } = taskSpan(date, endIn);
       let rd = freqOn ? "" : $("#fRd").value, rt = freqOn ? "" : $("#fRt").value; if (rd || rt) { rd = rd || date; rt = rt || "09:00"; }
       const oldT = sheetForm.dataset.edit ? state.tasks.find((x) => x.id === sheetForm.dataset.edit) : null;

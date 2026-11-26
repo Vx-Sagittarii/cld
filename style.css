@@ -733,3 +733,10 @@ button.chip-glass.zoom { min-width: 40px; min-height: 40px; display: inline-flex
 .plus { transition: opacity .25s, transform .25s; }
 .plus.scrolling { opacity: .3; }
 .hero-media img { object-position: 50% 73%; }
+
+/* v73 : échéance / fréquence */
+.qks { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0 8px; }
+.qks[hidden] { display: none; }
+.qks button { border: 1px solid var(--line); background: #1A0D40; color: var(--muted, #b9a8e8); border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 700; cursor: pointer; }
+.qks button:active { background: #2a1760; color: #fff; }
+#tkHint { display: block; margin: -4px 4px 10px; }
