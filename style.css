@@ -740,3 +740,22 @@ button.chip-glass.zoom { min-width: 40px; min-height: 40px; display: inline-flex
 .qks button { border: 1px solid var(--line); background: #1A0D40; color: var(--muted, #b9a8e8); border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 700; cursor: pointer; }
 .qks button:active { background: #2a1760; color: #fff; }
 #tkHint { display: block; margin: -4px 4px 10px; }
+
+/* v74 : objectif sport avec + / −, couleurs par type d'activité, tâches du calendrier en lecture seule */
+.goal-ed.off b { opacity: .55; }
+.step { display: inline-flex; align-items: center; gap: 8px; }
+.step button { width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--line); background: #1A0D40; color: #fff; font-size: 20px; font-weight: 700; line-height: 1; cursor: pointer; }
+.step button:active { background: #2a1760; }
+.step button[disabled] { opacity: .3; pointer-events: none; }
+.step b { min-width: 18px; text-align: center; font-size: 18px; }
+.step small { opacity: .65; font-size: 12px; }
+.addact { margin-top: 14px; } .addact summary { cursor: pointer; font-size: 14px; font-weight: 700; padding: 8px 0; }
+#sport-goal.flash { animation: goalflash 1.4s ease-out; }
+@keyframes goalflash { 0%, 40% { box-shadow: 0 0 0 3px #FF8A3D, 0 0 24px rgba(255,138,61,.5); } 100% { box-shadow: none; } }
+.day.sp.pole::after, .day.sp.act::before { display: none; }
+.day.sp .tdots { position: absolute; bottom: 4px; left: 0; right: 0; display: flex; justify-content: center; gap: 3px; pointer-events: none; }
+.day.sp .tdots i { width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 0 1.5px rgba(0,0,0,.5); }
+.legend2 { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 2px 0 10px; font-size: 13px; opacity: .9; }
+.legend2 span { display: inline-flex; align-items: center; gap: 6px; }
+.legend2 i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.row .time .chev { opacity: .5; margin-left: 4px; font-size: 18px; }

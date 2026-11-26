@@ -713,15 +713,16 @@ function viewCalendar() {
     ${tks.length ? `<div class="card"><h3>Tâches du jour</h3>${tks.map((t) => `
       <div class="row">
         <div class="bar-owner" style="background:${colorOf(t)}"></div>
-        <div class="t" data-act="edit-task" data-id="${t.id}" style="cursor:pointer"><b>${esc(t.title)}</b><small>${esc(labelOf(t))}</small></div>
-        <div class="time">${tFreq(t) ? ((tmeta(t).dn || []).includes(ui.selected) ? "✓" : "🔁") : mine(t) + "%"}</div>
-      </div>`).join("")}</div>` : ""}
+        <div class="t" data-act="goto-task" data-id="${t.id}" style="cursor:pointer"><b>${esc(t.title)}</b><small>${esc(labelOf(t))}</small></div>
+        <div class="time">${tFreq(t) ? ((tmeta(t).dn || []).includes(ui.selected) ? "✓" : "🔁") : mine(t) + "%"} <span class="chev" aria-hidden="true">›</span></div>
+      </div>`).join("")}<small class="muted">Touche une tâche pour l'ouvrir dans l'onglet Tâches.</small></div>` : ""}
 
     ${SPORT_HOME ? sportCard() : ""}`;
 }
 
 // Liens Hevy / Strava de chacun (ouverts dans un nouvel onglet)
 const okUrl = (u) => typeof u === "string" && /^https:\/\//.test(u);
+let goalTimer = 0;
 let hevyOn = false, hevyBusy = false, hevySyncAt = null;
 const fmtDur = (a, b) => { if (!a || !b) return ""; const m = Math.round((new Date(b) - new Date(a)) / 60000); return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}` : `${m} min`; };
 const fmtVol = (v) => v >= 1000 ? (Math.round(v / 100) / 10).toString().replace(".", ",") + " t" : v + " kg";
@@ -746,6 +747,7 @@ const weekMon = (iso) => toISO(mondayOf(fromISO(iso)));
 const goalFor = (who, mon) => (state.goals || []).filter((g) => g.owner === who && String(g.from).slice(0, 10) <= mon).sort((a, b) => (a.from < b.from ? 1 : -1))[0] || null;
 // Types d'activités suivies : salle (Hevy, automatique), course (montre ou saisie), pole dance (saisie) + activités perso nommées
 const RUN_RE = /run/;
+const SPCOL = { gym: ["#FFD23F", "salle"], run: ["#4DB8FF", "course"], pole: ["#FF7AC8", "pole dance"], perso: ["#B46BFF", "perso"], autre: ["#9BE7E0", "autre"] }; // couleur par type d'activité
 const customOf = (who) => (state.custom || []).filter((c) => c.owner === who);
 const kindsOf = (who) => [["gym", "🏋️ Salle"], ["run", "🏃 Course"], ["pole", "🩰 Pole dance"], ...customOf(who).map((c) => [c.id, "✨ " + c.name])];
 const manualKinds = (who) => kindsOf(who).filter(([k]) => k !== "gym");
@@ -802,34 +804,28 @@ function sportGoalEditor() {
   if (!cloud || permOff("sport")) return "";
   const who = viewing() ? ui.viewAs : me, mon = weekMon(toISO(new Date()));
   if (viewing()) return sportGoalCard(who);
-  const cur = targetsOf(goalFor(who, mon)), d = ui.goalDraft || cur, ks = kindsOf(me);
-  const wend = toISO(addDays(fromISO(mon), 6)), doneK = (k) => daysOf(me, k, mon, wend).size;
-  const chips = (k) => Array.from({ length: 8 }, (_, v) => `<button type="button" class="nchip ${(d[k] || 0) === v ? "on" : ""}" data-act="goal-set" data-k="${k}" data-v="${v}">${v}</button>`).join("");
-  if (!ui.goalOpen && !ui.goalDraft) {
-    // Résumé sur la période affichée : objectif par semaine × (jours de la période ÷ 7). Le filtre Moi / Sophie / Nous choisit qui on voit.
-    const pair = isPair(me) ? PAIR : [me], whos = chipsOn() ? (ui.show.nous ? pair : [pair.find((x) => ui.show[x]) || me]) : [me];
-    const [pa, pb] = periodBounds(ui.period, fromISO(ui.selected)), nd = daysBetween(toISO(pa), toISO(pb)) + 1, day = ui.period === "day";
-    const per = { week: "cette semaine", month: "ce mois", year: "cette année" }[ui.period];
-    const one = (w) => {
-      const tg = targetsOf(goalFor(w, mon)), col = prof(w)?.color || "#A45CFF", own = w === me && !day;
-      const rows = kindsOf(w).filter(([k]) => (tg[k] || 0) > 0).map(([k, label]) => {
-        if (day) { const ok = daysOf(w, k, ui.selected, ui.selected).size > 0; return `<div class="goal-ed"><b>${esc(label)}</b><span style="color:${ok ? "#3DDC97" : "inherit"}">${ok ? "✓ Fait" : "Pas fait"}</span></div>`; }
-        const goal = Math.max(1, Math.round((tg[k] * nd) / 7)), done = daysOf(w, k, toISO(pa), toISO(pb)).size;
-        return `<div class="goal-ed"><b>${esc(label)}</b><span>${done} / ${goal} ${per}</span></div><div class="mbar slim"><i style="width:${Math.min(100, Math.round((done / goal) * 100))}%;--c:${done >= goal ? "#3DDC97" : col}"></i></div>`;
-      }).join("") || `<p class="muted">Aucun objectif défini.</p>`;
-      return `<div class="card"${w === me ? ' id="sport-goal"' : ""}><h3>🎯 Objectif sport${whos.length > 1 ? " · " + esc(prof(w)?.name || w) : ""}</h3>${rows}
-      ${day ? "" : `<small class="muted">Objectif par semaine × ${nd} jours ÷ 7</small>`}
-      ${own ? `<div class="btn-line"><button class="btn small" data-act="goal-open">Modifier</button></div>` : ""}</div>`;
-    };
-    return whos.map(one).join("") + (day ? `<small class="muted" style="display:block;padding:0 6px">Pour ajouter une séance : « + » puis « Séance de sport ».</small>` : "");
-  }
-  const dirty = !!ui.goalDraft && ks.some(([k]) => (d[k] || 0) !== (cur[k] || 0));
-  return `<div class="card" id="sport-goal"><h3>🎯 Objectif sport par semaine</h3>
-    <p class="muted">Combien de jours par semaine pour chaque activité ? La salle se compte toute seule avec Hevy, la course avec ta montre (Strava / Garmin). Tu peux aussi cocher des jours à la main dans l'onglet Sport.</p>
-    ${ks.map(([k, label]) => `<div class="goal-ed"><b>${esc(label)}${k.startsWith("c_") ? ` <button type="button" class="del-mini" data-act="custom-del" data-id="${k}" aria-label="Supprimer cette activité">×</button>` : ""}</b><span>${doneK(k)} fait${doneK(k) > 1 ? "s" : ""} cette semaine · objectif ${d[k] || 0} / 7</span></div>${(cur[k] || 0) > 0 ? `<div class="mbar slim"><i style="width:${Math.min(100, Math.round((doneK(k) / cur[k]) * 100))}%;--c:${doneK(k) >= cur[k] ? "#3DDC97" : "#A45CFF"}"></i></div>` : ""}<div class="nchips">${chips(k)}</div>`).join("")}
-    <div class="btn-line"><button class="btn small ${dirty ? "primary" : ""}" data-act="goal-save" ${dirty ? "" : "disabled"}>Enregistrer l'objectif</button></div>
-    <div class="goal-ed" style="margin-top:16px"><b>Ajouter une activité à toi</b></div>
-    <div class="btn-line"><input id="cuName" maxlength="24" placeholder="ex. Natation, Yoga, Escalade…" style="flex:1"><button class="btn small" data-act="custom-add">Ajouter</button></div>${lastWeekLine(me)}</div>`;
+  // Objectif par semaine × (jours de la période ÷ 7). Le filtre Moi / Sophie / Nous choisit qui on voit ; seul MON objectif se règle, avec + / −.
+  const pair = isPair(me) ? PAIR : [me], whos = chipsOn() ? (ui.show.nous ? pair : [pair.find((x) => ui.show[x]) || me]) : [me];
+  const [pa, pb] = periodBounds(ui.period, fromISO(ui.selected)), nd = daysBetween(toISO(pa), toISO(pb)) + 1, day = ui.period === "day";
+  const per = { week: "cette semaine", month: "ce mois", year: "cette année" }[ui.period];
+  const one = (w) => {
+    const tg = targetsOf(goalFor(w, mon)), col = prof(w)?.color || "#A45CFF", own = w === me && !day;
+    const list = own ? kindsOf(w) : kindsOf(w).filter(([k]) => (tg[k] || 0) > 0);
+    const rows = list.map(([k, label]) => {
+      const g = tg[k] || 0;
+      if (day) { const ok = daysOf(w, k, ui.selected, ui.selected).size > 0; return `<div class="goal-ed"><b>${esc(label)}</b><span style="color:${ok ? "#3DDC97" : "inherit"}">${ok ? "✓ Fait" : "Pas fait"}</span></div>`; }
+      const goal = Math.max(1, Math.round((g * nd) / 7)), done = daysOf(w, k, toISO(pa), toISO(pb)).size;
+      const step = own ? `<span class="step"><button type="button" data-act="goal-step" data-k="${k}" data-d="-1" aria-label="Un jour de moins par semaine" ${g <= 0 ? "disabled" : ""}>−</button><b>${g}</b><button type="button" data-act="goal-step" data-k="${k}" data-d="1" aria-label="Un jour de plus par semaine" ${g >= 7 ? "disabled" : ""}>+</button><small>j / sem.</small></span>` : "";
+      const del = k.startsWith("c_") && own ? ` <button type="button" class="del-mini" data-act="custom-del" data-id="${k}" aria-label="Supprimer cette activité">×</button>` : "";
+      const line = g > 0 ? `<small class="muted">${done} / ${goal} ${per}</small><div class="mbar slim"><i style="width:${Math.min(100, Math.round((done / goal) * 100))}%;--c:${done >= goal ? "#3DDC97" : col}"></i></div>` : `<small class="muted">Pas d'objectif · touche + pour en fixer un</small>`;
+      return `<div class="goal-ed ${g > 0 ? "" : "off"}"><b>${esc(label)}${del}</b>${step}</div>${line}`;
+    }).join("") || `<p class="muted">Aucun objectif défini.</p>`;
+    const add = own ? `<details class="addact"><summary>＋ Ajouter une activité</summary><div class="btn-line"><input id="cuName" maxlength="24" placeholder="ex. Natation, Yoga, Escalade…" style="flex:1"><button class="btn small" data-act="custom-add">Ajouter</button></div></details>` : "";
+    return `<div class="card"${w === me ? ' id="sport-goal"' : ""}><h3>🎯 Objectif sport${whos.length > 1 ? " · " + esc(prof(w)?.name || w) : ""}</h3>
+      ${own ? `<p class="muted">Jours visés par semaine. Touche − ou + : c'est enregistré tout de suite.</p>` : ""}${rows}
+      ${day || ui.period === "week" ? "" : `<small class="muted">Objectif par semaine × ${nd} jours ÷ 7</small>`}${add}${own ? lastWeekLine(me) : ""}</div>`;
+  };
+  return whos.map(one).join("") + (day ? `<small class="muted" style="display:block;padding:0 6px">Pour ajouter une séance : « + » puis « Séance de sport ». Pour changer l'objectif : vue Semaine, Mois ou Année.</small>` : "");
 }
 function lastWeekLine(who) {
   const mon = weekMon(toISO(new Date())), r = weekStats(who, toISO(addDays(fromISO(mon), -7)));
@@ -953,12 +949,24 @@ function viewSport() {
   const myActs = (state.acts || []).filter((a) => a.owner === who);
   const actsM = myActs.filter((a) => String(a.day).slice(0, 7) === y + "-" + pad(mo + 1)), actDays = new Set(myActs.map((a) => String(a.day).slice(0, 10)));
   // grille du mois
+  // Types d'activité d'un jour (une pastille de couleur chacun) : salle, course, pole dance, activités perso, autres activités de montre
+  const typesOn = (iso) => {
+    const t = [], ad = myActs.filter((x) => String(x.day).slice(0, 10) === iso), isRun = (x) => RUN_RE.test(String(x.kind || "").toLowerCase());
+    if (days.has(iso) || hasLog(who, iso, "gym")) t.push("gym");
+    if (ad.some(isRun) || hasLog(who, iso, "run")) t.push("run");
+    if (hasLog(who, iso, "pole")) t.push("pole");
+    if ((state.logs || []).some((l) => l.owner === who && String(l.kind).startsWith("c_") && lday(l) === iso)) t.push("perso");
+    if (ad.some((x) => !isRun(x))) t.push("autre");
+    return t;
+  };
+  const seenTypes = new Set();
   const first = mondayOf(m); let cells = "";
   for (let i = 0; i < 42; i++) {
     const d = addDays(first, i), iso = toISO(d);
     if (i >= 35 && d.getMonth() !== mo) break;
     const n = days.get(iso) || 0, inMonth = d.getMonth() === mo;
-    cells += `<button class="day sp ${!inMonth ? "out" : ""} ${iso >= toISO(selMon) && iso <= toISO(selSun) ? "inwk" : ""} ${n ? "went" : ""} ${anyLog(who, iso) ? "pole" : ""} ${actDays.has(iso) ? "act" : ""} ${iso === toISO(today) ? "today" : ""} ${iso === ui.selected ? "sel" : ""}" style="--c:${p?.color || "#A45CFF"}" data-act="pick" data-date="${iso}">${d.getDate()}${n > 1 ? `<span class="cnt">${n}</span>` : ""}</button>`;
+    const ty = typesOn(iso); ty.forEach((x) => seenTypes.add(x));
+    cells += `<button class="day sp ${!inMonth ? "out" : ""} ${iso >= toISO(selMon) && iso <= toISO(selSun) ? "inwk" : ""} ${ty.length ? "went" : ""} ${iso === toISO(today) ? "today" : ""} ${iso === ui.selected ? "sel" : ""}" style="--c:${p?.color || "#A45CFF"}" data-act="pick" data-date="${iso}">${d.getDate()}${n > 1 ? `<span class="cnt">${n}</span>` : ""}${ty.length ? `<span class="tdots">${ty.map((x) => `<i style="background:${SPCOL[x][0]}"></i>`).join("")}</span>` : ""}</button>`;
   }
   const dayWs = all.filter((w) => wIso(w.day) === ui.selected);
   const dayActs = myActs.filter((a) => String(a.day).slice(0, 10) === ui.selected);
@@ -999,7 +1007,8 @@ function viewSport() {
     ${manualTxt ? `<div class="polecount">${manualTxt} <small>ce mois-ci (jours saisis à la main)</small></div>` : ""}
     ${cloud && !permOff("sport") ? sportGoalCard(who, toISO(selMon)) : ""}
     <div class="card">
-      <h3>Jours d'entraînement <small class="legend"><i class="lg gym"></i>salle <i class="lg pole"></i>saisi <i class="lg act"></i>montre</small></h3>
+      <h3>Jours d'entraînement</h3>
+      ${seenTypes.size ? `<div class="legend2">${Object.entries(SPCOL).filter(([k]) => seenTypes.has(k)).map(([, [c, l]]) => `<span><i style="background:${c}"></i>${l}</span>`).join("")}</div>` : ""}
       <div class="dow"><span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span></div>
       <div class="grid">${cells}</div>
     </div>
@@ -1466,7 +1475,7 @@ document.addEventListener("click", (ev) => {
   if (el.classList.contains("tab")) { ui.tab = el.dataset.tab; render(true); window.scrollTo(0, 0); return; }
 
   const act = el.dataset.act;
-  if (viewing() && ["new-event", "edit-event", "del-event", "new-task", "edit-task", "del-sheet", "freq-day", "goal-open", "new-sport", "save-sport", "del-task", "save-prog", "save-event", "save-task", "profile", "log-toggle", "goal-set", "goal-save", "goal-drop", "custom-add", "custom-del", "hevy-refresh", "watch-sync", "watch-remove", "strava-save", "garmin-save"].includes(act)) { toast("Lecture seule : tu consultes le profil de " + (prof(ui.viewAs)?.name || "l'autre")); return; }
+  if (viewing() && ["new-event", "edit-event", "del-event", "new-task", "edit-task", "del-sheet", "freq-day", "goal-open", "new-sport", "save-sport", "del-task", "save-prog", "save-event", "save-task", "profile", "log-toggle", "goal-set", "goal-step", "goal-save", "goal-drop", "custom-add", "custom-del", "hevy-refresh", "watch-sync", "watch-remove", "strava-save", "garmin-save"].includes(act)) { toast("Lecture seule : tu consultes le profil de " + (prof(ui.viewAs)?.name || "l'autre")); return; }
   switch (act) {
     case "vis-switch": {
       const inp = document.getElementById(el.dataset.for), pub = inp.value !== el.dataset.pub;
@@ -1556,28 +1565,6 @@ document.addEventListener("click", (ev) => {
       push("set_sport_log", { p_day: day, p_kind: kind, p_on: on });
       break;
     }
-    case "goal-set": {
-      const cur = targetsOf(goalFor(me, weekMon(toISO(new Date()))));
-      ui.goalDraft = ui.goalDraft || { ...cur };
-      ui.goalDraft[el.dataset.k] = Number(el.dataset.v); render(); break;
-    }
-    case "goal-save": {
-      const d = ui.goalDraft; if (!d) break; const mon = weekMon(toISO(new Date()));
-      const t = {}; kindsOf(me).forEach(([k]) => { t[k] = d[k] || 0; });
-      state.goals = (state.goals || []).filter((g) => !(g.owner === me && String(g.from).slice(0, 10) === mon)).concat([{ owner: me, from: mon, targets: t, gym: t.gym || 0, pole: t.pole || 0 }]);
-      ui.goalDraft = null; ui.goalOpen = false; render(); lastSnap = "";
-      rpc("set_sport_targets", { p_token: token, p_targets: t }).then(() => toast("Objectif enregistré 🎯")).catch(() => { toast("Enregistrement impossible"); pull(); });
-      break;
-    }
-    case "goal-drop": {
-      const k = el.dataset.k, lab = (kindsOf(me).find(([x]) => x === k) || [k, k])[1];
-      if (!confirm(`Retirer « ${lab.replace(/^\S+\s/, "")} » de ton objectif ? Tu ne la fais plus cette semaine.`)) break;
-      const mon = weekMon(toISO(new Date())), t = Object.assign({}, targetsOf(goalFor(me, mon)), { [k]: 0 });
-      state.goals = (state.goals || []).filter((g) => !(g.owner === me && String(g.from).slice(0, 10) === mon)).concat([{ owner: me, from: mon, targets: t, gym: t.gym || 0, pole: t.pole || 0 }]);
-      ui.goalDraft = null; render(); toast("Activité retirée de l'objectif");
-      push("set_sport_targets", { p_targets: t });
-      break;
-    }
     case "custom-add": {
       const name = ($("#cuName").value || "").trim();
       if (!name) { $("#cuName").focus(); break; }
@@ -1591,13 +1578,26 @@ document.addEventListener("click", (ev) => {
       const id = el.dataset.id, c = customOf(me).find((x) => x.id === id);
       if (!c || !confirm(`Supprimer « ${c.name} » ? Les jours cochés pour cette activité seront effacés.`)) break;
       state.custom = state.custom.filter((x) => !(x.owner === me && x.id === id)); state.logs = (state.logs || []).filter((l) => !(l.owner === me && l.kind === id));
-      if (ui.goalDraft) delete ui.goalDraft[id];
       render(); lastSnap = "";
       rpc("delete_sport_custom", { p_token: token, p_id: id }).catch(() => { toast("Action impossible"); pull(); });
       break;
     }
-    case "goal-open": ui.goalOpen = true; render(); break;
-    case "goto-goal": ui.tab = "tasks"; ui.goalOpen = true; render(true); setTimeout(() => document.getElementById("sport-goal")?.scrollIntoView({ behavior: "smooth", block: "center" }), 80); break;
+    case "goto-task": { // depuis le calendrier : on ouvre l'onglet Tâches sur ce jour (rien ne se modifie depuis le calendrier)
+      const t = state.tasks.find((x) => x.id === el.dataset.id);
+      ui.tab = "tasks"; ui.period = "day";
+      if (t && chipsOn()) ui.show = { [t.scope === "commun" ? "nous" : me]: true };
+      render(true); setTimeout(() => [...document.querySelectorAll('#view [data-act="edit-task"]')].find((e) => e.dataset.id === el.dataset.id)?.scrollIntoView({ behavior: "smooth", block: "center" }), 80); break;
+    }
+    case "goal-step": { // + / − sur un objectif : enregistré tout de suite pour la semaine en cours
+      const mon = weekMon(toISO(new Date())), k = el.dataset.k, t = {};
+      const cur = targetsOf(goalFor(me, mon)); kindsOf(me).forEach(([x]) => { t[x] = cur[x] || 0; });
+      t[k] = Math.max(0, Math.min(7, (t[k] || 0) + Number(el.dataset.d)));
+      state.goals = (state.goals || []).filter((g) => !(g.owner === me && String(g.from).slice(0, 10) === mon)).concat([{ owner: me, from: mon, targets: t, gym: t.gym || 0, pole: t.pole || 0 }]);
+      render(); lastSnap = "";
+      clearTimeout(goalTimer); goalTimer = setTimeout(() => rpc("set_sport_targets", { p_token: token, p_targets: t }).then(() => toast("Objectif enregistré 🎯")).catch(() => { toast("Enregistrement impossible"); pull(); }), 700);
+      break;
+    }
+    case "goto-goal": ui.tab = "tasks"; render(true); setTimeout(() => { const g = document.getElementById("sport-goal"); if (!g) return; g.scrollIntoView({ behavior: "smooth", block: "center" }); g.classList.add("flash"); }, 80); break;
     case "view-as": ui.viewAs = el.dataset.id === me ? null : el.dataset.id; render(); break;
     case "pick": ui.selected = el.dataset.date; ui.month = startOfMonth(fromISO(ui.selected)); render(); break; // un jour d'un autre mois fait changer de mois
     case "show-toggle": ui.show = { [el.dataset.k]: true }; render(); break; // un seul choix : Nelson, Sophie ou Nous
