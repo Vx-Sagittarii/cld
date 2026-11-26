@@ -658,3 +658,11 @@ body.login .topbar { display: none !important; }
 main { padding-top: calc(env(safe-area-inset-top) + 88px); }
 #view { scroll-margin-top: calc(env(safe-area-inset-top) + 88px); }
 .plus-menu { top: calc(env(safe-area-inset-top) + 70px); }
+
+/* ===== v55 : « + » flottant en bas à droite, toujours visible quand on défile ===== */
+.plus { position: fixed; top: auto; right: max(16px, calc((100% - 560px) / 2 + 16px)); bottom: calc(env(safe-area-inset-bottom) + 84px); width: 58px; height: 58px; z-index: 45; box-shadow: 0 8px 22px rgba(0,0,0,.45), 0 6px 16px rgba(139,69,217,.4); }
+.plus svg { width: 28px; height: 28px; }
+.plus-menu { top: auto; bottom: calc(env(safe-area-inset-bottom) + 152px); right: max(16px, calc((100% - 560px) / 2 + 16px)); }
+.topbar::after { content: ""; width: 46px; flex: none; } /* garde la date bien centrée */
+.chat-fab { bottom: calc(154px + env(safe-area-inset-bottom)); }
+.chat-panel { bottom: calc(154px + env(safe-area-inset-bottom)); max-height: min(52vh, 440px); }
