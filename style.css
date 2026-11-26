@@ -666,3 +666,7 @@ main { padding-top: calc(env(safe-area-inset-top) + 88px); }
 .topbar::after { content: ""; width: 46px; flex: none; } /* garde la date bien centrée */
 .chat-fab { bottom: calc(154px + env(safe-area-inset-bottom)); }
 .chat-panel { bottom: calc(154px + env(safe-area-inset-bottom)); max-height: min(52vh, 440px); }
+/* v56 : épuré */
+.del-link{display:block;width:100%;margin-top:18px;padding:12px;background:none;border:0;color:#ff6b6b;font:inherit;font-size:14px;cursor:pointer;border-radius:12px}
+.del-link.armed{background:#ff6b6b;color:#fff;font-weight:600}
+.task-top{cursor:pointer}

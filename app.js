@@ -675,7 +675,7 @@ function viewCalendar() {
       <div class="grid cal">${cells}</div>
     </div>
 
-    ${dayStrip(evs)}
+    ${evs.some((e) => parseTime(e.time).s !== null) ? dayStrip(evs) : ""}
     <div class="card">
       <h3>${JOURS_LONG[sel.getDay()]} ${sel.getDate()} ${MOIS_LONG[sel.getMonth()]}</h3>
       ${evs.length ? evs.map((e) => `
@@ -683,7 +683,7 @@ function viewCalendar() {
           <div class="bar-owner" style="background:${colorOf(e)}"></div>
           <div class="t" ${e.google ? "" : `data-act="edit-event" data-id="${e.id}"`}><b>${esc(e.title)}</b><small>${esc(labelOf(e))}${metaOf(e).rep ? " · ↻ " + REP_LABEL[metaOf(e).rep].toLowerCase() : ""}${metaOf(e).rem !== undefined ? " · 🔔" : ""}${endDateOf(e) > e.date ? " · " + esc(fmtWhen(e)) : ""}</small></div>
           <div class="time">${endDateOf(e) > e.date ? `Jour ${Math.round((fromISO(ui.selected) - fromISO(e.date)) / 864e5) + 1}/${Math.round((fromISO(endDateOf(e)) - fromISO(e.date)) / 864e5) + 1}` : fmtWhen(e) || "Journée"}</div>
-          ${e.google ? `<span class="gtag" title="Google Agenda">G</span>` : `<button class="del" data-act="del-event" data-id="${e.id}" aria-label="Supprimer">×</button>`}
+          ${e.google ? `<span class="gtag" title="Google Agenda">G</span>` : ""}
         </div>`).join("") : `<div class="empty">Rien de prévu ce jour-là. Touche « + » en bas à droite pour ajouter.</div>`}
     </div>
 
@@ -782,6 +782,9 @@ function sportGoalEditor() {
   const cur = targetsOf(goalFor(who, mon)), d = ui.goalDraft || cur, ks = kindsOf(me);
   const wend = toISO(addDays(fromISO(mon), 6)), doneK = (k) => daysOf(me, k, mon, wend).size;
   const chips = (k) => Array.from({ length: 8 }, (_, v) => `<button type="button" class="nchip ${(d[k] || 0) === v ? "on" : ""}" data-act="goal-set" data-k="${k}" data-v="${v}">${v}</button>`).join("");
+  if (!ui.goalOpen && !ui.goalDraft) return `<div class="card" id="sport-goal"><h3>🎯 Objectif sport · personnel</h3>
+    ${ks.filter(([k]) => (cur[k] || 0) > 0).map(([k, label]) => `<div class="goal-ed"><b>${esc(label)}</b><span>${doneK(k)} / ${cur[k]} cette semaine</span></div>`).join("") || `<p class="muted">Aucun objectif défini.</p>`}
+    <div class="btn-line"><button class="btn small" data-act="goal-open">Modifier</button></div></div>`;
   const dirty = !!ui.goalDraft && ks.some(([k]) => (d[k] || 0) !== (cur[k] || 0));
   return `<div class="card" id="sport-goal"><h3>🎯 Objectif sport par semaine · personnel</h3>
     <p class="muted">Combien de jours par semaine pour chaque activité ? La salle se compte toute seule avec Hevy, la course avec ta montre (Strava / Garmin). Tu peux aussi cocher des jours à la main dans l'onglet Sport.</p>
@@ -1053,11 +1056,11 @@ function viewTasks() {
     ${goalsCard()}
     <div class="seg">${Object.keys(labels).map((p) => `<button class="${p === ui.period ? "on" : ""}" data-act="period" data-p="${p}">${labels[p]}</button>`).join("")}</div>
 
-    <div class="card overall">
+    ${list.length ? `<div class="card overall">
       <div class="ring" id="ring" style="--p:${avg}"><span id="ringTxt">${avg}%</span></div>
       <div class="t"><b>Avancement ${ui.period === "day" ? "du jour" : ui.period === "week" ? "de la semaine" : ui.period === "month" ? "du mois" : "de l'année"}</b>
-      <small>${list.length ? `<b style="display:inline">${list.filter((t) => shown(t) >= 100).length}/${list.length}</b> tâche${list.length > 1 ? "s" : ""} terminée${list.filter((t) => shown(t) >= 100).length > 1 ? "s" : ""}` : "Aucune tâche pour l'instant"}</small></div>
-    </div>
+      <small>${list.length ? `<b style="display:inline">${list.filter((t) => shown(t) >= 100).length}/${list.length}</b> tâche${list.length > 1 ? "s" : ""} terminée${list.filter((t) => shown(t) >= 100).length > 1 ? "s" : ""}` : ""}</small></div>
+    </div>` : ""}
 
     <div class="card">
       ${list.map((t) => {
@@ -1066,12 +1069,11 @@ function viewTasks() {
         const sl = (val, who, c, off) => `<input type="range" min="0" max="100" step="5" value="${val}" data-act="slide" data-id="${t.id}" data-who="${who}" style="--v:${val};--c:${c}" ${off ? "disabled" : ""}>`;
         return `
         <div class="task ${shown(t) >= 100 ? "done" : ""}" data-id="${t.id}">
-          <div class="task-top">
+          <div class="task-top" data-act="edit-task" data-id="${t.id}">
             <i class="chip" style="background:${colorOf(t)}"></i>
             <b>${esc(t.title)}</b>
             ${persoView() ? `<small class="vis">${labelOf(t)}</small>` : ""}
             ${two ? "" : `<span class="pct" data-w="${w1}">${mine(t)}%</span>`}
-            <button class="edit-mini" data-act="edit-task" data-id="${t.id}" aria-label="Modifier la tâche">✎</button><button class="del" data-act="del-task" data-id="${t.id}" aria-label="Supprimer">×</button>
           </div>
           ${two ? [[PAIR[0], "a", t.progress], [PAIR[1], "b", t.progress_b || 0]].map(([id, w, v]) => `
             <div class="who"><span style="color:${prof(id)?.color}">${esc(prof(id)?.name || id)}${(me === PAIR[1]) === (w === "b") ? " (toi)" : ""}</span><span class="pct" data-w="${w}">${v}%</span></div>${sl(v, w, prof(id)?.color, (me === PAIR[1]) !== (w === "b"))}`).join("")
@@ -1109,9 +1111,9 @@ function goalsCard() {
         <div class="g-t"><b>${esc(t.title)}</b>
           <small>${PL[t.period]}${persoView() ? " · " + labelOf(t) : ""} · échéance ${d.getDate()} ${MOIS[d.getMonth()]} (${when})</small>
           <div class="g-bar"><span style="width:${p}%;background:${colorOf(t)}"></span></div></div>
-        <span class="g-pct">${p >= 100 ? "✓" : p + "%"}</span></button><button type="button" class="edit-mini abs" data-act="edit-task" data-id="${t.id}" aria-label="Modifier cet objectif">✎</button></div>`;
+        <span class="g-pct">${p >= 100 ? "✓" : p + "%"}</span></button></div>`;
     }).join("")}
-    <small class="muted">Touche un objectif pour modifier son avancement, ✎ pour changer son titre, sa date ou sa visibilité.</small></div>`;
+</div>`;
 }
 
 // ----- Rappels par notification (Web Push) -----
@@ -1338,6 +1340,7 @@ function openEventSheet(forId, edit) {
       <div class="trow"><span>Alerte 🔔</span><select id="fRem">${opt("", "Aucune", m.rem)}${opt(0, "À l'heure", m.rem)}${opt(10, "10 minutes avant", m.rem)}${opt(60, "1 heure avant", m.rem)}${opt(1440, "1 jour avant", m.rem)}</select></div>
     </div>
     <label class="check"><input type="checkbox" id="fCd" ${m.cd ? "checked" : ""}><span>Afficher en compte à rebours</span></label>
+    ${edit ? `<button type="button" class="del-link" data-act="del-sheet" data-kind="event" data-id="${edit.id}">Supprimer l'événement</button>` : ""}
   </div>`;
   sheet.showModal();
   let prevDate = v.date;
@@ -1378,6 +1381,7 @@ function openTaskSheet(edit) {
       <div class="field"><label>Date (dans la période)</label><input type="date" id="fDate" value="${d}"></div>
     </div>
     ${vis}
+    ${edit ? `<button type="button" class="del-link" data-act="del-sheet" data-kind="task" data-id="${edit.id}">Supprimer la tâche</button>` : ""}
   </div>`;
   sheet.showModal();
   if (!edit) setTimeout(() => $("#fTitle").focus(), 50);
@@ -1412,7 +1416,7 @@ document.addEventListener("click", (ev) => {
   if (el.classList.contains("tab")) { ui.tab = el.dataset.tab; render(true); window.scrollTo(0, 0); return; }
 
   const act = el.dataset.act;
-  if (viewing() && ["new-event", "edit-event", "del-event", "new-task", "edit-task", "new-sport", "save-sport", "del-task", "save-prog", "save-event", "save-task", "profile", "log-toggle", "goal-set", "goal-save", "goal-drop", "custom-add", "custom-del", "hevy-refresh", "watch-sync", "watch-remove", "strava-save", "garmin-save"].includes(act)) { toast("Lecture seule : tu consultes le profil de " + (prof(ui.viewAs)?.name || "l'autre")); return; }
+  if (viewing() && ["new-event", "edit-event", "del-event", "new-task", "edit-task", "del-sheet", "goal-open", "new-sport", "save-sport", "del-task", "save-prog", "save-event", "save-task", "profile", "log-toggle", "goal-set", "goal-save", "goal-drop", "custom-add", "custom-del", "hevy-refresh", "watch-sync", "watch-remove", "strava-save", "garmin-save"].includes(act)) { toast("Lecture seule : tu consultes le profil de " + (prof(ui.viewAs)?.name || "l'autre")); return; }
   switch (act) {
     case "vis-switch": {
       const inp = document.getElementById(el.dataset.for), pub = inp.value !== el.dataset.pub;
@@ -1511,7 +1515,7 @@ document.addEventListener("click", (ev) => {
       const d = ui.goalDraft; if (!d) break; const mon = weekMon(toISO(new Date()));
       const t = {}; kindsOf(me).forEach(([k]) => { t[k] = d[k] || 0; });
       state.goals = (state.goals || []).filter((g) => !(g.owner === me && String(g.from).slice(0, 10) === mon)).concat([{ owner: me, from: mon, targets: t, gym: t.gym || 0, pole: t.pole || 0 }]);
-      ui.goalDraft = null; render(); lastSnap = "";
+      ui.goalDraft = null; ui.goalOpen = false; render(); lastSnap = "";
       rpc("set_sport_targets", { p_token: token, p_targets: t }).then(() => toast("Objectif enregistré 🎯")).catch(() => { toast("Enregistrement impossible"); pull(); });
       break;
     }
@@ -1542,7 +1546,8 @@ document.addEventListener("click", (ev) => {
       rpc("delete_sport_custom", { p_token: token, p_id: id }).catch(() => { toast("Action impossible"); pull(); });
       break;
     }
-    case "goto-goal": ui.tab = "tasks"; render(true); setTimeout(() => document.getElementById("sport-goal")?.scrollIntoView({ behavior: "smooth", block: "center" }), 80); break;
+    case "goal-open": ui.goalOpen = true; render(); break;
+    case "goto-goal": ui.tab = "tasks"; ui.goalOpen = true; render(true); setTimeout(() => document.getElementById("sport-goal")?.scrollIntoView({ behavior: "smooth", block: "center" }), 80); break;
     case "view-as": ui.viewAs = el.dataset.id === me ? null : el.dataset.id; render(); break;
     case "pick": ui.selected = el.dataset.date; ui.month = startOfMonth(fromISO(ui.selected)); render(); break; // un jour d'un autre mois fait changer de mois
     case "show-toggle": ui.show = { [el.dataset.k]: true }; render(); break; // un seul choix : Nelson, Sophie ou Nous
@@ -1615,6 +1620,13 @@ document.addEventListener("click", (ev) => {
       state.tasks.push(tk); push("upsert_task", tkArgs(tk));
       if (chipsOn()) ui.show = { [f.scope === "commun" ? "nous" : me]: true }; // on affiche la catégorie de la tâche créée
       save(); sheet.close(); ui.period = period; ui.selected = date; ui.month = startOfMonth(fromISO(date)); render(); break;
+    }
+    case "del-sheet": {
+      if (!el.classList.contains("armed")) { el.classList.add("armed"); el.textContent = "Confirmer la suppression"; setTimeout(() => { if (el.isConnected) { el.classList.remove("armed"); el.textContent = el.dataset.kind === "task" ? "Supprimer la tâche" : "Supprimer l'événement"; } }, 4000); break; }
+      const id = el.dataset.id;
+      if (el.dataset.kind === "task") { state.tasks = state.tasks.filter((t) => t.id !== id); push("delete_task", { p_id: id }); }
+      else { state.events = state.events.filter((e) => e.id !== id); push("delete_event", { p_id: id }); }
+      save(); sheet.close(); render(); toast("Supprimé"); break;
     }
     case "del-event": state.events = state.events.filter((e) => e.id !== el.dataset.id); push("delete_event", { p_id: el.dataset.id }); save(); render(); break;
     case "del-task": state.tasks = state.tasks.filter((t) => t.id !== el.dataset.id); push("delete_task", { p_id: el.dataset.id }); save(); render(); break;
