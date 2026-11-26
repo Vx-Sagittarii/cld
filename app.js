@@ -101,7 +101,7 @@ const viewing = () => cloud && isPair(me) && !!ui.viewAs && ui.viewAs !== me && 
 const canSee = (it) => viewing() ? (it.scope === "commun" && (!it.google || it.owner === ui.viewAs)) : (it.scope === "commun" ? isPair(me) : it.owner === me);
 // Deux volets : « Perso » = tout ce que je vois (privé + public avec l'autre) ; « Commun » = seulement le public
 const passes = (it) => canSee(it) && (viewing() || !isPair(me) || ui.filter !== "commun" || it.scope === "commun");
-const persoView = () => isPair(me) && !viewing() && ui.filter !== "commun";
+const persoView = () => false; // plus de volet Perso/Commun : les pastilles Moi / Sophie / Nous le remplacent
 // « Qui » est concerné : une personne (privé = propriétaire ; commun avec meta.w = pour cette personne) ou « nous » (commun)
 const whoOf = (it) => it.google ? it.owner : it.scope === "commun" ? (metaOf(it).w || "nous") : it.owner;
 const nousColor = () => document.body.classList.contains("noel") ? "#FF5A6E" : COMMUN_COLOR;
@@ -1043,12 +1043,12 @@ function linksCard() {
 function viewTasks() {
   const ref = fromISO(ui.selected);
   const key = periodKey(ui.period, ref);
-  const list = state.tasks.filter((t) => t.period === ui.period && t.key === key && passes(t));
+  const list = state.tasks.filter((t) => t.period === ui.period && t.key === key && cpass(t));
   const avg = list.length ? Math.round(list.reduce((s, t) => s + shown(t), 0) / list.length) : 0;
   const labels = { day: "Jour", week: "Semaine", month: "Mois", year: "Année" };
 
   return `
-    ${profileBar()}${viewBar()}${filterBar()}
+    ${profileBar()}${chipBar()}
     ${sportGoalEditor()}
     <div class="seg">${Object.keys(labels).map((p) => `<button class="${p === ui.period ? "on" : ""}" data-act="period" data-p="${p}">${labels[p]}</button>`).join("")}</div>
 
@@ -1096,7 +1096,7 @@ function startOfTask(t) {
 }
 function goalsCard() {
   const today = fromISO(toISO(new Date())), PL = { week: "Semaine", month: "Mois", year: "Année" };
-  const goals = state.tasks.filter((t) => t.period !== "day" && passes(t)).map((t) => ({ t, d: deadlineOf(t) }))
+  const goals = state.tasks.filter((t) => t.period !== "day" && cpass(t)).map((t) => ({ t, d: deadlineOf(t) }))
     .filter((g) => g.d >= today).sort((a, b) => a.d - b.d || a.t.title.localeCompare(b.t.title)).slice(0, 12);
   if (!goals.length) return "";
   return `<div class="card goals"><h3>Objectifs à venir</h3>
@@ -1280,7 +1280,7 @@ const visSwitch = (id, pub, priv, isPub) => `<div class="field"><label>Visibilit
     <span class="knob"></span><span class="vtxt">${isPub ? "👥 Public" : "🔒 Privé"}</span></button>
   <small class="vhint">${isPub ? esc(prof(PAIR[0])?.name || "") + " et " + esc(prof(PAIR[1])?.name || "") + " le voient" : "Visible par toi seul"}</small></div>`;
 // Tâche : privé (juste moi) ou public (Nelson + Sophie = commun)
-const visField = () => isPair(me) ? visSwitch("fVis", "commun", "perso", ui.filter === "commun") : "";
+const visField = () => isPair(me) ? visSwitch("fVis", "commun", "perso", !ui.show[me] || ui.show.nous) : "";
 const scopeField = (forId) => isPair(me) ? visSwitch("fScope", "commun", forId || me, !forId) : "";
 // Modification : passer un événement de Public à Privé (toi) ou inversement
 const visEditField = (e) => (isPair(me) && (e.scope === "commun" || e.owner === me)) ? visSwitch("fScope", "commun", me, e.scope === "commun") : "";
@@ -1612,7 +1612,7 @@ document.addEventListener("click", (ev) => {
       }
       const tk = { id: uid(), title, period, key, ...f, progress: 0, progress_b: 0 };
       state.tasks.push(tk); push("upsert_task", tkArgs(tk));
-      if (isPair(me) && cloud) ui.filter = f.scope === "commun" ? "commun" : "perso";
+      if (chipsOn()) ui.show[f.scope === "commun" ? "nous" : me] = true; // la tâche créée doit être visible
       save(); sheet.close(); ui.period = period; ui.selected = date; ui.month = startOfMonth(fromISO(date)); render(); break;
     }
     case "del-event": state.events = state.events.filter((e) => e.id !== el.dataset.id); push("delete_event", { p_id: el.dataset.id }); save(); render(); break;
@@ -1796,7 +1796,7 @@ document.addEventListener("input", (ev) => {
     pendingProg.set(t.id, true); card.querySelector(".save-prog").hidden = false;
     // Recalcule le cercle global
     const key = periodKey(ui.period, fromISO(ui.selected));
-    const list = state.tasks.filter((x) => x.period === ui.period && x.key === key && passes(x));
+    const list = state.tasks.filter((x) => x.period === ui.period && x.key === key && cpass(x));
     const avg = Math.round(list.reduce((s, x) => s + shown(x), 0) / list.length);
     $("#ring").style.setProperty("--p", avg);
     $("#ringTxt").textContent = avg + "%";
