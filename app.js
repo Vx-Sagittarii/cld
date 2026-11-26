@@ -774,7 +774,7 @@ function sportGoalCard(who, monIso) {
   if (!st.has) body = `<div class="empty">${own ? "Pas encore d'objectif sport." : "Aucun objectif défini."}</div>`;
   else {
     const left = 7 - ((new Date().getDay() + 6) % 7) - 1;
-    body = st.items.map((i) => goalBar(i.label, i.done, i.goal, col, own ? i.k : "")).join("")
+    body = st.items.map((i) => goalBar(i.label, i.done, i.goal, col, "")).join("")
       + `<small class="muted">${st.ok ? "Objectif de la semaine atteint 🎉" : !isNow ? (mon > weekMon(toISO(new Date())) ? "Semaine à venir" : "Objectif manqué cette semaine-là") : left > 0 ? `Encore ${left} jour${left > 1 ? "s" : ""} pour y arriver` : "Dernier jour de la semaine"}</small>`;
   }
   const hist = [];
@@ -783,7 +783,7 @@ function sportGoalCard(who, monIso) {
   const lastTxt = last ? `<div class="lastweek ${last.r.ok ? "ok" : "ko"}">Semaine dernière : ${last.r.ok ? "objectif réussi ✓" : "objectif manqué"} <small>(${esc(sumTxt(last.r))})</small></div>` : "";
   const chips = hist.length ? `<div class="hist">${hist.reverse().map((h) => `<span class="hc ${h.r.ok ? "ok" : "ko"}" title="Semaine ${dm(h.m)} : ${esc(sumTxt(h.r))}"><b>${h.r.ok ? "✓" : "✗"}</b><i>${dm(h.m)}</i></span>`).join("")}</div>` : "";
   return `<div class="card goalcard"><h3>🎯 Objectif sport ${isNow ? "de la semaine" : "de la semaine choisie"} · ${esc(p?.name || "")}</h3><small class="muted wkrange">${dm(mon)} - ${dm(toISO(addDays(fromISO(mon), 6)))}</small>${body}${lastTxt}${chips}
-    ${own ? `<div class="btn-line"><button class="btn small" data-act="goto-goal">${st.has ? "Modifier mon objectif" : "Définir mon objectif"}</button></div>` : ""}</div>`;
+    ${own ? `<div class="btn-line"><button class="btn small" data-act="goto-goal">Modifier</button></div>` : ""}</div>`;
 }
 // Éditeur de l'objectif (onglet Tâches) : « x / 7 jours » pour chaque activité, + activités perso
 function sportGoalEditor() {
