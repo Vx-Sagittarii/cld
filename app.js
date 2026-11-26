@@ -1862,6 +1862,27 @@ function importData(file) {
 }
 
 // ---------------------------------------------------------------
+// Glisser le doigt à gauche / à droite = onglet suivant / précédent (Calendrier → Tâches → Sport → Astro)
+// ---------------------------------------------------------------
+(function setupSwipe() {
+  let x0 = 0, y0 = 0, t0 = 0, ok = false;
+  const skip = "input, select, textarea, dialog, button.chk, .pbar, .nchips, .wkbars, .strip, .chat-panel, .hero-media";
+  document.addEventListener("touchstart", (e) => {
+    const t = e.touches[0]; ok = e.touches.length === 1 && !e.target.closest(skip) && !sheet.open && !needLogin;
+    x0 = t.clientX; y0 = t.clientY; t0 = Date.now();
+  }, { passive: true });
+  document.addEventListener("touchend", (e) => {
+    if (!ok) return; ok = false;
+    const t = e.changedTouches[0], dx = t.clientX - x0, dy = t.clientY - y0;
+    if (Math.abs(dx) < 70 || Math.abs(dy) > Math.abs(dx) * 0.5 || Date.now() - t0 > 700) return; // geste horizontal, net et rapide
+    const order = [...document.querySelectorAll(".tabbar .tab")].filter((b) => !b.hidden).map((b) => b.dataset.tab);
+    const i = order.indexOf(ui.tab); if (i < 0) return; // Réglages / administration : pas de balayage
+    const n = order[i + (dx < 0 ? 1 : -1)]; if (!n) return;
+    ui.tab = n; render(true); window.scrollTo(0, 0);
+  }, { passive: true });
+})();
+
+// ---------------------------------------------------------------
 // 8. BANDEAU PHOTO ANIMÉ
 // ---------------------------------------------------------------
 (function setupHero() {
