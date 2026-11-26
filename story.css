@@ -109,3 +109,6 @@
 @keyframes st-fl{from{opacity:.9}to{opacity:0}}
 #story .atkname{position:absolute;left:0;right:0;top:250px;text-align:center;font-size:18px;color:#fff;text-shadow:3px 3px 0 #FF3B4E;z-index:3;animation:st-pop .2s steps(3)}
 #story #hint{position:absolute;left:0;right:0;bottom:24px;text-align:center;color:#fff;font-size:7px;letter-spacing:2px;opacity:0;z-index:9;pointer-events:none}
+
+/* pause : toutes les animations s'arrêtent quand on quitte le site */
+#story.paused *{animation-play-state:paused!important}

@@ -133,6 +133,8 @@ function bgmStop(){BGM.on=false;clearInterval(BGM.timer);BGM.timer=null}
 
 /* ---------- ATTENTES (tap / pause) ---------- */
 let token=0,tapRes=null,skipFn=null;
+let paused=false;                            // animation en pause (onglet / appli en arrière-plan)
+function tmo(fn,ms){let left=ms,id=setInterval(()=>{if(paused)return;left-=50;if(left<=0){clearInterval(id);fn()}},50);return id}  // comme setTimeout, mais le compte à rebours s'arrête en pause
 const AUTO_MS=5000;                          // 5 s sans action : la suite se lance seule, l'histoire ne s'arrête JAMAIS
 let lastMove=Date.now(),pendingChoice=null;  // dernier signe de vie + choix de menu en attente (pour le chien de garde)
 function aborted(my){if(my!==token)throw"abort"}
@@ -140,7 +142,7 @@ function sleep(ms){
   const my=token;lastMove=Date.now();
   return new Promise(res=>{
     if(FAST)return res();
-    let t=setTimeout(done,ms);
+    let t=tmo(done,ms);
     function done(){clearTimeout(t);skipFn=null;res()}
     skipFn=done;
   }).then(()=>aborted(my));
@@ -150,11 +152,12 @@ function tap(){
   if(FAST)return Promise.resolve();
   hint(true);
   return new Promise(res=>{
-    const auto=setTimeout(()=>{if(tapRes)tapRes()},AUTO_MS);          // personne ne touche : la suite se lance seule
+    const auto=tmo(()=>{if(tapRes)tapRes()},AUTO_MS);          // personne ne touche : la suite se lance seule
     tapRes=()=>{clearTimeout(auto);tapRes=null;res()};
   }).then(()=>{hint(false);aborted(my)});
 }
-setInterval(()=>{                           // chien de garde : attente de toucher, de choix, de pause ou de texte → on force la suite
+const wd=setInterval(()=>{                    // chien de garde
+  if(paused){lastMove=Date.now();return}      // en pause : on ne force rien (attente de toucher, de choix ou de texte sinon)
   if(Date.now()-lastMove<AUTO_MS+400)return;
   lastMove=Date.now();
   if(typing)typing();else if(tapRes)tapRes();else if(pendingChoice)pendingChoice();else if(skipFn)skipFn();
@@ -315,6 +318,7 @@ async function say(id,text,think=false){
     let i=0,done=false;
     const fin=()=>{if(done)return;done=true;clearInterval(iv);tx.textContent=text;typing=null;res()};
     const iv=setInterval(()=>{
+      if(paused)return;
       i++;tx.textContent=text.slice(0,i);
       if(i%2===0)SFX.blip((id==="nelson"?250:420)+Math.random()*60);
       if(i>=text.length)fin();
@@ -463,7 +467,7 @@ function typeText(el,text,f){
     if(FAST){el.textContent=text;return res()}
     let i=0,done=false;
     const fin=()=>{if(done)return;done=true;clearInterval(iv);el.textContent=text;typing=null;res()};
-    const iv=setInterval(()=>{i++;el.textContent=text.slice(0,i);if(i%2===0)SFX.blip(f||330);if(i>=text.length)fin()},26);
+    const iv=setInterval(()=>{if(paused)return;i++;el.textContent=text.slice(0,i);if(i%2===0)SFX.blip(f||330);if(i>=text.length)fin()},26);
     typing=fin;
   }).then(()=>aborted(my));
 }
@@ -483,7 +487,7 @@ function btChoose(prompt,opts){                      // menu : les boutons non p
     for(const o of opts){const b=document.createElement("button");b.className="mbtn"+(o.on?"":" off");b.textContent=o.label;
       b.onclick=()=>{SFX.pop();done(o.id)};m.appendChild(b)}
     pendingChoice=()=>done(prevu);                    // pas de choix en 5 s : le choix prévu se lance seul
-    timer=setTimeout(()=>done(prevu),AUTO_MS);
+    timer=tmo(()=>done(prevu),AUTO_MS);
     if(FAST)done(prevu);
   });
 }
@@ -701,7 +705,18 @@ $("#endClose").onclick=()=>close();
 play();
 
     // ======================= fin du moteur =======================
+    // Pause automatique quand on quitte le site (autre onglet, autre appli, écran verrouillé) : image, texte, compte à rebours et musique
+    let blurred = false; const onBlur = () => { blurred = true; applyPause(); }, onFocus = () => { blurred = false; applyPause(); };
+    function applyPause() {
+      const p = document.hidden || blurred;
+      if (p === paused) return;
+      paused = p; RT.classList.toggle("paused", p);
+      try { if (ctx) p ? ctx.suspend() : ctx.resume(); } catch (e) {}
+      lastMove = Date.now();
+    }
+    document.addEventListener("visibilitychange", applyPause); addEventListener("blur", onBlur); addEventListener("focus", onFocus);
     closeFn = function () {
+      document.removeEventListener("visibilitychange", applyPause); removeEventListener("blur", onBlur); removeEventListener("focus", onFocus); clearInterval(wd); paused = false;
       try { resetScene(); } catch (e) {}
       try { bgmStop(); ambience(false); if (ctx) ctx.close(); } catch (e) {}
       removeEventListener("resize", fit);
