@@ -555,7 +555,8 @@ function resetScene(){
    FICHE DE SCÈNE — chapitre 1 (étapes 1 à 28)
    Chaque entrée = une étape lue par le moteur (t = type d'étape)
    ===================================================================== */
-const CH1=SHEET.steps;
+// Correctif de texte appliqué à la lecture (la copie en base peut rester ancienne) : « QUE » en majuscules
+const CH1=JSON.parse(JSON.stringify(SHEET.steps).replace(/fumes que des cigarettes/g,"fumes QUE des cigarettes"));
 
 let sweatEl=null;                              // goutte de gêne de Nelson
 async function runSheet(sheet){
