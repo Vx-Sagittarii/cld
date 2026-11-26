@@ -391,18 +391,29 @@ function viewLogin() {
   </div>`;
 }
 
+// Bandeau fixe : réglages · flèches + date / période choisie · « + »
+function updateTopbar() {
+  const tab = ui.tab; let t = "", sub = "", act = "";
+  if (tab === "cal") { t = `${MOIS_LONG[ui.month.getMonth()]} ${ui.month.getFullYear()}`; const sd = fromISO(ui.selected); sub = `${JOURS_LONG[sd.getDay()]} ${sd.getDate()} ${MOIS[sd.getMonth()]}`; act = "month"; }
+  else if (tab === "tasks") { t = periodLabel(ui.period, fromISO(ui.selected)); act = "shift"; }
+  else if (tab === "sport") { const mon = mondayOf(fromISO(ui.selected)); t = `${MOIS_LONG[ui.month.getMonth()]} ${ui.month.getFullYear()}`; sub = `Semaine du ${dm(toISO(mon))} au ${dm(toISO(addDays(mon, 6)))}`; act = "month"; }
+  else t = tab === "astro" ? "Astro" : ui.admin ? "Administration" : "Réglages";
+  $("#tbTitle").textContent = t; $("#tbSub").textContent = sub; $("#tbSub").hidden = !sub;
+  ["tbPrev", "tbNext"].forEach((id) => { const b = $("#" + id); b.hidden = !act; b.dataset.act = act; });
+}
 function render(animate = false) {
   chatSync();
   document.body.classList.toggle("login", needLogin || (loaded && needPseudo));
   if (needLogin) { view.innerHTML = viewLogin(); hero.classList.add("off"); return; }
   if (loaded && needPseudo) { if (!$("#psName")) view.innerHTML = viewPseudo(); hero.classList.add("off"); return; } // pseudo obligatoire avant tout le reste
   if (ui.tab === "cal") ui.viewAs = null; // le calendrier se règle avec les pastilles Moi / Sophie / Nous
-  $("#plusBtn").hidden = ui.tab === "settings"; $("#mTask").hidden = permOff("tasks"); $("#mSport").hidden = permOff("sport");
+  $("#plusBtn").style.visibility = ui.tab === "settings" ? "hidden" : "visible"; $("#mTask").hidden = permOff("tasks"); $("#mSport").hidden = permOff("sport");
   if (permOff(ui.tab)) { ui.tab = "cal"; toast("Cette fonction est désactivée pour ton profil. Demande à Nelson pour l'activer."); }
   document.querySelectorAll(".tab").forEach((t) => { t.classList.toggle("on", t.dataset.tab === ui.tab); t.hidden = permOff(t.dataset.tab); });
   document.body.classList.toggle("solo", cloud && !isNS(me));
   renderHero();
   applySeason();
+  updateTopbar();
   if (!loaded) { view.innerHTML = `<div class="empty">Chargement…</div>`; return; }
   if (ui.tab === "cal") view.innerHTML = (cloud && !isNS(me) ? `<div class="brandbar" aria-hidden="true">IWI2ME</div>` : "") + banners() + viewCalendar();
   else if (ui.tab === "tasks") view.innerHTML = viewTasks();
@@ -654,13 +665,6 @@ function viewCalendar() {
   const tks = state.tasks.filter((t) => t.period === "day" && t.key === ui.selected && cpass(t));
 
   return `
-    <div class="head">
-      <div><h1>${MOIS_LONG[m.getMonth()]} ${m.getFullYear()}</h1></div>
-      <div class="nav">
-        <button class="icon-btn nav-btn" data-act="month" data-dir="-1" aria-label="Mois précédent" title="Mois précédent"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg></button>
-        <button class="icon-btn nav-btn" data-act="month" data-dir="1" aria-label="Mois suivant" title="Mois suivant"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>
-      </div>
-    </div>
     ${profileBar()}${chipBar()}
     ${countdownCards()}
     ${dec ? adventCountdown() : ""}
@@ -932,8 +936,6 @@ function viewSport() {
       <div><h1>Sport</h1><div class="sub">${MOIS_LONG[mo]} ${y} · ${esc(p?.name || "")}</div></div>
       <div class="nav">
         ${canRefresh ? `<button class="icon-btn nav-btn ${hevyBusy ? "spin" : ""}" data-act="hevy-refresh" aria-label="Actualiser mes séances" title="Actualiser mes séances"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v5h-5"/></svg></button>` : ""}
-        <button class="icon-btn nav-btn" data-act="month" data-dir="-1" aria-label="Mois précédent"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg></button>
-        <button class="icon-btn nav-btn" data-act="month" data-dir="1" aria-label="Mois suivant"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>
       </div>
     </div>
     ${viewBar()}
@@ -1046,13 +1048,6 @@ function viewTasks() {
   const labels = { day: "Jour", week: "Semaine", month: "Mois", year: "Année" };
 
   return `
-    <div class="head">
-      <div><h1>Tâches</h1><div class="sub">${periodLabel(ui.period, ref)}</div></div>
-      <div class="nav">
-        <button class="icon-btn nav-btn" data-act="shift" data-dir="-1" aria-label="Période précédente" title="Précédent"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg></button>
-        <button class="icon-btn nav-btn" data-act="shift" data-dir="1" aria-label="Période suivante" title="Suivant"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>
-      </div>
-    </div>
     ${profileBar()}${viewBar()}${filterBar()}
     ${sportGoalEditor()}
     <div class="seg">${Object.keys(labels).map((p) => `<button class="${p === ui.period ? "on" : ""}" data-act="period" data-p="${p}">${labels[p]}</button>`).join("")}</div>
