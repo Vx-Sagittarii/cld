@@ -177,7 +177,7 @@ function periodLabel(period, d) {
   if (period === "day") return `${JOURS_LONG[d.getDay()]} ${d.getDate()} ${MOIS[d.getMonth()]}`;
   if (period === "week") {
     const a = mondayOf(d), b = addDays(a, 6);
-    return `Semaine ${isoWeek(d).week} · ${a.getDate()} ${MOIS[a.getMonth()]} – ${b.getDate()} ${MOIS[b.getMonth()]}`;
+    return `${dm(toISO(a))} - ${dm(toISO(b))}`; // ex. 18/12 - 24/12
   }
   if (period === "month") return `${MOIS_LONG[d.getMonth()]} ${d.getFullYear()}`;
   return String(d.getFullYear());
@@ -396,8 +396,8 @@ function viewLogin() {
 function updateTopbar() {
   const tab = ui.tab; let t = "", sub = "", act = "";
   if (tab === "cal") { t = `${MOIS_LONG[ui.month.getMonth()]} ${ui.month.getFullYear()}`; const sd = fromISO(ui.selected); sub = `${JOURS_LONG[sd.getDay()]} ${sd.getDate()} ${MOIS[sd.getMonth()]}`; act = "month"; }
-  else if (tab === "tasks") { t = periodLabel(ui.period, fromISO(ui.selected)); act = "shift"; }
-  else if (tab === "sport") { const mon = mondayOf(fromISO(ui.selected)); t = `${MOIS_LONG[ui.month.getMonth()]} ${ui.month.getFullYear()}`; sub = `Semaine du ${dm(toISO(mon))} au ${dm(toISO(addDays(mon, 6)))}`; act = "month"; }
+  else if (tab === "tasks") { t = periodLabel(ui.period, fromISO(ui.selected)); if (ui.period === "week") sub = "Semaine " + isoWeek(fromISO(ui.selected)).week; act = "shift"; }
+  else if (tab === "sport") { const mon = mondayOf(fromISO(ui.selected)); t = `${MOIS_LONG[ui.month.getMonth()]} ${ui.month.getFullYear()}`; sub = `${dm(toISO(mon))} - ${dm(toISO(addDays(mon, 6)))}`; act = "month"; }
   else t = tab === "astro" ? "Astro" : ui.admin ? "Administration" : "Réglages";
   $("#tbTitle").textContent = t; $("#tbSub").textContent = sub; $("#tbSub").hidden = !sub;
   ["tbPrev", "tbNext"].forEach((id) => { const b = $("#" + id); b.hidden = !act; b.dataset.act = act; });
@@ -770,8 +770,8 @@ function sportGoalCard(who, monIso) {
   for (let i = 1; i <= 6; i++) { const m = toISO(addDays(fromISO(mon), -7 * i)), r = weekStats(who, m); if (r.has) hist.push({ m, r }); }
   const last = hist.find((h) => h.m === toISO(addDays(fromISO(mon), -7)));
   const lastTxt = last ? `<div class="lastweek ${last.r.ok ? "ok" : "ko"}">Semaine dernière : ${last.r.ok ? "objectif réussi ✓" : "objectif manqué"} <small>(${esc(sumTxt(last.r))})</small></div>` : "";
-  const chips = hist.length ? `<div class="hist">${hist.reverse().map((h) => `<span class="hc ${h.r.ok ? "ok" : "ko"}" title="Semaine du ${dm(h.m)} : ${esc(sumTxt(h.r))}"><b>${h.r.ok ? "✓" : "✗"}</b><i>${dm(h.m)}</i></span>`).join("")}</div>` : "";
-  return `<div class="card goalcard"><h3>🎯 Objectif sport ${isNow ? "de la semaine" : "de la semaine choisie"} · ${esc(p?.name || "")}</h3><small class="muted wkrange">Du ${dm(mon)} au ${dm(toISO(addDays(fromISO(mon), 6)))}</small>${body}${lastTxt}${chips}
+  const chips = hist.length ? `<div class="hist">${hist.reverse().map((h) => `<span class="hc ${h.r.ok ? "ok" : "ko"}" title="Semaine ${dm(h.m)} : ${esc(sumTxt(h.r))}"><b>${h.r.ok ? "✓" : "✗"}</b><i>${dm(h.m)}</i></span>`).join("")}</div>` : "";
+  return `<div class="card goalcard"><h3>🎯 Objectif sport ${isNow ? "de la semaine" : "de la semaine choisie"} · ${esc(p?.name || "")}</h3><small class="muted wkrange">${dm(mon)} - ${dm(toISO(addDays(fromISO(mon), 6)))}</small>${body}${lastTxt}${chips}
     ${own ? `<div class="btn-line"><button class="btn small" data-act="goto-goal">${st.has ? "Modifier mon objectif" : "Définir mon objectif"}</button></div>` : ""}</div>`;
 }
 // Éditeur de l'objectif (onglet Tâches) : « x / 7 jours » pour chaque activité, + activités perso
@@ -904,7 +904,7 @@ function viewSport() {
   // muscles les plus sollicités (séries par groupe musculaire), sur la semaine sélectionnée ou le mois affiché
   const selMon = mondayOf(fromISO(ui.selected)), selSun = addDays(selMon, 6);
   const inP = ui.bodyP === "week" ? all.filter((w) => { const k = wIso(w.day); return k >= toISO(selMon) && k <= toISO(selSun); }) : inM;
-  const pLabel = ui.bodyP === "week" ? `Semaine du ${dm(toISO(selMon))} au ${dm(toISO(selSun))}` : `${MOIS_LONG[mo]} ${y}`;
+  const pLabel = ui.bodyP === "week" ? `Semaine ${dm(toISO(selMon))} - ${dm(toISO(selSun))}` : `${MOIS_LONG[mo]} ${y}`;
   const mus = new Map();
   inP.forEach((w) => (w.ex || []).forEach((e) => { if (e.m) mus.set(e.m, (mus.get(e.m) || 0) + (e.s || 0)); }));
   const mlist = [...mus.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8), mmax = Math.max(1, ...mlist.map((x) => x[1]));
@@ -941,7 +941,7 @@ function viewSport() {
     </div>
     ${viewBar()}
     ${nothing ? `<div class="card"><div class="empty">Rien n'est connecté pour l'instant. Connecte Hevy ou ta montre dans les Réglages, ou ajoute une séance à la main avec le « + » en bas à droite.</div><div class="btn-line"><button class="btn small primary" data-act="goto-watch">Ouvrir les Réglages</button></div></div>` : ""}
-    <div class="sphead">Semaine du ${dm(toISO(selMon))} au ${dm(toISO(selSun))}</div>
+    <div class="sphead">Semaine ${dm(toISO(selMon))} - ${dm(toISO(selSun))}</div>
     <div class="spstats" style="--c:${p?.color || "#A45CFF"}">
       <div><b>${inW.length}</b><span>séance${inW.length > 1 ? "s" : ""}</span></div>
       <div><b>${wDays}</b><span>jour${wDays > 1 ? "s" : ""} actif${wDays > 1 ? "s" : ""}</span></div>
