@@ -720,3 +720,7 @@ input[type=range]::-webkit-slider-thumb { width: 30px; height: 30px; }
 dialog[open] .sheet { animation: sheetUp .26s cubic-bezier(.2,.8,.2,1) both; }
 @keyframes sheetUp { from { transform: translateY(28px); opacity: 0; } to { transform: none; opacity: 1; } }
 .grid.cal .day { min-height: 66px; } /* les semaines vides sont plus basses, celles avec événements grandissent seules */
+/* v69 : l'image démarre pile au titre IWI2ME et laisse voir les personnages en entier */
+.hero-media img { object-position: 50% 70%; }
+#spotNelson { top: 59.5%; }
+#spotSophie { top: 63.5%; }
