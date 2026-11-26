@@ -1424,7 +1424,7 @@ function openTaskSheet(edit) {
     </div>
     <div id="rowDays" hidden><div class="qks" id="qkDays"><button type="button" data-qd="0,1,2,3,4,5,6">Tous les jours</button><button type="button" data-qd="0,1,2,3,4">En semaine</button><button type="button" data-qd="5,6">Week-end</button></div><div class="wdays">${WD.map((n, i) => `<button type="button" data-wd="${i}" class="${(tm.f || []).includes(i) ? "on" : ""}">${n}</button>`).join("")}</div></div>
     <div class="field" id="trackRow"><label>Suivi de l'avancement</label>
-      <div class="seg two" id="tkTrack"><button type="button" data-t="pct">Pourcentage</button><button type="button" data-t="ck">Case à cocher</button></div>
+      <div class="seg two" id="tkTrack"><button type="button" data-t="ck">Case à cocher</button><button type="button" data-t="pct">Pourcentage</button></div>
       <small class="muted" id="trackHint"></small></div>
     <div class="field"><label>Note</label><textarea id="fNote" rows="3" maxlength="600" placeholder="Détails, lien, ce qu'il faut penser à faire…">${esc(tm.n || "")}</textarea></div>
     <div class="tcard" id="remCard"><div class="trow"><span>🔔 Rappel</span><span class="dt"><input type="date" id="fRd" value="${tm.rd || ""}"><input type="time" id="fRt" class="tm" value="${tm.rt || ""}"></span></div></div>
@@ -1442,7 +1442,7 @@ function openTaskSheet(edit) {
     sheetForm.dataset.track = t; $("#tkTrack").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.t === t));
     $("#trackHint").textContent = t === "ck" ? "Une simple case : tu la coches quand c'est fait." : "Un curseur de 0 à 100 % : tu règles l'avancement au fur et à mesure.";
   };
-  setTrack(edit && isCk(edit) ? "ck" : "pct");
+  setTrack(edit ? (isCk(edit) ? "ck" : "pct") : "ck"); // nouvelle tâche : case à cocher par défaut ; une tâche existante garde son mode
   $("#tkTrack").addEventListener("click", (ev) => { const b = ev.target.closest("button[data-t]"); if (b) setTrack(b.dataset.t); });
   setMode(edit && tFreq(edit) ? "freq" : "span");
   if (edit && tFreq(edit)) $("#fDate").value = d; // en fréquence, la date = le début
