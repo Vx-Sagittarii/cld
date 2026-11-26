@@ -130,6 +130,7 @@ function freqPct(t) { // avancement = jours faits ÷ jours prévus dans la péri
   return o.length ? Math.round((o.filter((x) => dn.includes(x)).length / o.length) * 100) : 0;
 }
 const myField = () => "progress"; // tâche commune : un seul curseur partagé (progress, recopié dans progress_b)
+const isCk = (t) => !tFreq(t) && !!tmeta(t).ck; // suivi par case à cocher (fait / pas fait) au lieu d'un pourcentage
 const mine = (t) => (tFreq(t) ? freqPct(t) : (t.scope === "commun" ? tp(t) : t.progress)) || 0;
 const shown = (t) => tFreq(t) ? mine(t) : persoView() ? mine(t) : tp(t); // volet Perso : seulement mon %, volet Commun : la moyenne
 const labelOf = (it) => (it.google && it.owner !== me) ? `${prof(it.owner)?.name || "L'autre"} · Google` : it.scope === "commun" ? (metaOf(it).w ? (prof(metaOf(it).w)?.name || "?") : "Nous") : (isPair(me) ? "🔒 Privé" : (prof(it.owner)?.name || "?"));
@@ -714,7 +715,7 @@ function viewCalendar() {
       <div class="row">
         <div class="bar-owner" style="background:${colorOf(t)}"></div>
         <div class="t" data-act="goto-task" data-id="${t.id}" style="cursor:pointer"><b>${esc(t.title)}</b><small>${esc(labelOf(t))}</small></div>
-        <div class="time">${tFreq(t) ? ((tmeta(t).dn || []).includes(ui.selected) ? "✓" : "🔁") : mine(t) + "%"} <span class="chev" aria-hidden="true">›</span></div>
+        <div class="time">${tFreq(t) ? ((tmeta(t).dn || []).includes(ui.selected) ? "✓" : "🔁") : isCk(t) ? (mine(t) >= 100 ? "✓" : "☐") : mine(t) + "%"} <span class="chev" aria-hidden="true">›</span></div>
       </div>`).join("")}<small class="muted">Touche une tâche pour l'ouvrir dans l'onglet Tâches.</small></div>` : ""}
 
     ${SPORT_HOME ? sportCard() : ""}`;
@@ -1111,10 +1112,10 @@ function viewTasks() {
           <div class="task-top" data-act="edit-task" data-id="${t.id}">
             <i class="chip" style="background:${c}"></i>
             <b>${esc(t.title)}</b>
-            <span class="pct">${mine(t)}%</span>
+            <span class="pct">${isCk(t) ? (mine(t) >= 100 ? "✓" : "") : mine(t) + "%"}</span>
           </div>
           <small class="tsub"><span style="color:${c}">${esc(labelOf(t))}</span>${tFreq(t) ? ` · 🔁 ${tFreq(t).slice().sort().map((i) => WD[i]).join(" ")}` : ""}${!tFreq(t) && b > a ? ` · ${dmy(toISO(a))} → ${dmy(toISO(b))}` : ""}${tmeta(t).rd ? ` · 🔔 ${dm(tmeta(t).rd)} ${esc(tmeta(t).rt || "")}` : ""}${tmeta(t).n ? ` · 📝 ${esc(tmeta(t).n.length > 40 ? tmeta(t).n.slice(0, 40) + "…" : tmeta(t).n)}` : ""}</small>
-          ${tFreq(t) ? freqBlock(t, own, c) : `<input type="range" min="0" max="100" step="5" value="${mine(t)}" data-act="slide" data-id="${t.id}" style="--v:${mine(t)};--c:${c}" ${own ? "" : "disabled"} aria-label="Avancement : ${esc(t.title)}">`}
+          ${tFreq(t) ? freqBlock(t, own, c) : isCk(t) ? `<div class="fdays"><button type="button" class="fday ${mine(t) >= 100 ? "on" : ""}" style="--c:${c}" data-act="task-check" data-id="${t.id}" ${own ? "" : "disabled"}>${mine(t) >= 100 ? "✓ Fait" : "Marquer comme fait"}</button></div>` : `<input type="range" min="0" max="100" step="5" value="${mine(t)}" data-act="slide" data-id="${t.id}" style="--v:${mine(t)};--c:${c}" ${own ? "" : "disabled"} aria-label="Avancement : ${esc(t.title)}">`}
         </div>`; }).join("") || `<div class="empty">Aucune tâche ici. Touche « + » en bas à droite pour en ajouter une.</div>`}
     </div>
     ${goalsCard(new Set(list.map((t) => t.id)))}
@@ -1422,6 +1423,9 @@ function openTaskSheet(edit) {
       <div class="qks" id="qkDate"><button type="button" data-q="0">Aujourd'hui</button><button type="button" data-q="1">Demain</button><button type="button" data-q="7">Dans 1 semaine</button><button type="button" data-q="30">Dans 1 mois</button></div>
     </div>
     <div id="rowDays" hidden><div class="qks" id="qkDays"><button type="button" data-qd="0,1,2,3,4,5,6">Tous les jours</button><button type="button" data-qd="0,1,2,3,4">En semaine</button><button type="button" data-qd="5,6">Week-end</button></div><div class="wdays">${WD.map((n, i) => `<button type="button" data-wd="${i}" class="${(tm.f || []).includes(i) ? "on" : ""}">${n}</button>`).join("")}</div></div>
+    <div class="field" id="trackRow"><label>Suivi de l'avancement</label>
+      <div class="seg two" id="tkTrack"><button type="button" data-t="pct">Pourcentage</button><button type="button" data-t="ck">Case à cocher</button></div>
+      <small class="muted" id="trackHint"></small></div>
     <div class="field"><label>Note</label><textarea id="fNote" rows="3" maxlength="600" placeholder="Détails, lien, ce qu'il faut penser à faire…">${esc(tm.n || "")}</textarea></div>
     <div class="tcard" id="remCard"><div class="trow"><span>🔔 Rappel</span><span class="dt"><input type="date" id="fRd" value="${tm.rd || ""}"><input type="time" id="fRt" class="tm" value="${tm.rt || ""}"></span></div></div>
     ${vis}
@@ -1430,10 +1434,16 @@ function openTaskSheet(edit) {
   sheet.showModal();
   const setMode = (m) => { // « Échéance » (une date limite) ou « Fréquence » (jours de la semaine, répétés)
     sheetForm.dataset.mode = m; $("#tkMode").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.m === m));
-    $("#rowDays").hidden = m !== "freq"; $("#remCard").hidden = m === "freq"; $("#qkDate").hidden = m === "freq";
+    $("#rowDays").hidden = m !== "freq"; $("#remCard").hidden = m === "freq"; $("#qkDate").hidden = m === "freq"; $("#trackRow").hidden = m === "freq"; // une tâche fréquente se coche jour par jour
     $("#lblFrom").textContent = m === "freq" ? "À partir du" : "Pour le";
     $("#tkHint").textContent = m === "freq" ? "Revient chaque semaine aux jours choisis." : "À faire avant cette date.";
   };
+  const setTrack = (t) => { // « Pourcentage » : curseur de 0 à 100 % · « Case à cocher » : fait ou pas fait
+    sheetForm.dataset.track = t; $("#tkTrack").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.t === t));
+    $("#trackHint").textContent = t === "ck" ? "Une simple case : tu la coches quand c'est fait." : "Un curseur de 0 à 100 % : tu règles l'avancement au fur et à mesure.";
+  };
+  setTrack(edit && isCk(edit) ? "ck" : "pct");
+  $("#tkTrack").addEventListener("click", (ev) => { const b = ev.target.closest("button[data-t]"); if (b) setTrack(b.dataset.t); });
   setMode(edit && tFreq(edit) ? "freq" : "span");
   if (edit && tFreq(edit)) $("#fDate").value = d; // en fréquence, la date = le début
   $("#tkMode").addEventListener("click", (ev) => { const b = ev.target.closest("button[data-m]"); if (b) setMode(b.dataset.m); });
@@ -1475,7 +1485,7 @@ document.addEventListener("click", (ev) => {
   if (el.classList.contains("tab")) { ui.tab = el.dataset.tab; render(true); window.scrollTo(0, 0); return; }
 
   const act = el.dataset.act;
-  if (viewing() && ["new-event", "edit-event", "del-event", "new-task", "edit-task", "del-sheet", "freq-day", "goal-open", "new-sport", "save-sport", "del-task", "save-prog", "save-event", "save-task", "profile", "log-toggle", "goal-set", "goal-step", "goal-save", "goal-drop", "custom-add", "custom-del", "hevy-refresh", "watch-sync", "watch-remove", "strava-save", "garmin-save"].includes(act)) { toast("Lecture seule : tu consultes le profil de " + (prof(ui.viewAs)?.name || "l'autre")); return; }
+  if (viewing() && ["new-event", "edit-event", "del-event", "new-task", "edit-task", "del-sheet", "freq-day", "task-check", "goal-open", "new-sport", "save-sport", "del-task", "save-prog", "save-event", "save-task", "profile", "log-toggle", "goal-set", "goal-step", "goal-save", "goal-drop", "custom-add", "custom-del", "hevy-refresh", "watch-sync", "watch-remove", "strava-save", "garmin-save"].includes(act)) { toast("Lecture seule : tu consultes le profil de " + (prof(ui.viewAs)?.name || "l'autre")); return; }
   switch (act) {
     case "vis-switch": {
       const inp = document.getElementById(el.dataset.for), pub = inp.value !== el.dataset.pub;
@@ -1663,7 +1673,8 @@ document.addEventListener("click", (ev) => {
       const { period, key } = taskSpan(date, endIn);
       let rd = freqOn ? "" : $("#fRd").value, rt = freqOn ? "" : $("#fRt").value; if (rd || rt) { rd = rd || date; rt = rt || "09:00"; }
       const oldT = sheetForm.dataset.edit ? state.tasks.find((x) => x.id === sheetForm.dataset.edit) : null;
-      const note = $("#fNote").value.trim(), mj = note || rd || freqOn ? JSON.stringify({ ...(note ? { n: note } : {}), ...(rd ? { rd, rt } : {}), ...(freqOn ? { f: days, dn: oldT ? (tmeta(oldT).dn || []) : [] } : {}) }) : "";
+      const ck = !freqOn && sheetForm.dataset.track === "ck";
+      const note = $("#fNote").value.trim(), mj = note || rd || freqOn || ck ? JSON.stringify({ ...(note ? { n: note } : {}), ...(rd ? { rd, rt } : {}), ...(ck ? { ck: 1 } : {}), ...(freqOn ? { f: days, dn: oldT ? (tmeta(oldT).dn || []) : [] } : {}) }) : "";
       const syncRem = (tk, hadRem) => { // le rappel = un événement « ⏰ titre » lié à la tâche : il utilise les notifications déjà en place
         const eid = "r" + tk.id, m = tmeta(tk); state.events = state.events.filter((e) => e.id !== eid);
         if (m.rd) { const ev = { id: eid, title: "⏰ " + tk.title, date: m.rd, time: m.rt || "09:00", meta: JSON.stringify({ rem: 0 }), owner: tk.owner, scope: tk.scope }; state.events.push(ev); push("upsert_event", evArgs(ev));
@@ -1677,6 +1688,7 @@ document.addEventListener("click", (ev) => {
         if (o) {
           const hadRem = !!tmeta(o).rd;
           Object.assign(o, { title, period, key }); if (o.meta !== undefined || mj) o.meta = mj;
+          if (ck) { const v = tp(o) >= 100 ? 100 : 0; o.progress = v; if (o.scope === "commun") o.progress_b = v; } // en case à cocher : fait (100) ou pas fait (0)
           if ($("#fVis") && !(f.scope === "commun" && o.scope === "commun")) Object.assign(o, f);
           push("upsert_task", tkArgs(o)); syncRem(o, hadRem);
         }
@@ -1686,6 +1698,12 @@ document.addEventListener("click", (ev) => {
       state.tasks.push(tk); push("upsert_task", tkArgs(tk)); if (mj) syncRem(tk, false);
       if (chipsOn()) ui.show = { [f.scope === "commun" ? "nous" : me]: true }; // on affiche la catégorie de la tâche créée
       save(); sheet.close(); ui.selected = date; ui.month = startOfMonth(fromISO(date)); render(); break;
+    }
+    case "task-check": { // tâche à case à cocher : fait = 100 %, pas fait = 0 % (un seul état pour les deux si la tâche est commune)
+      const t = state.tasks.find((x) => x.id === el.dataset.id); if (!t) break;
+      const v = mine(t) >= 100 ? 0 : 100;
+      t.progress = v; if (t.scope === "commun") t.progress_b = v;
+      pendingProg.delete(t.id); save(); push("set_progress", { p_id: t.id, p_value: v }); render(); if (v === 100) toast("Terminé 🎉"); break;
     }
     case "freq-day": {
       const t = state.tasks.find((x) => x.id === el.dataset.id); if (!t) break;

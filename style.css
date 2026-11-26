@@ -759,3 +759,7 @@ button.chip-glass.zoom { min-width: 40px; min-height: 40px; display: inline-flex
 .legend2 span { display: inline-flex; align-items: center; gap: 6px; }
 .legend2 i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
 .row .time .chev { opacity: .5; margin-left: 4px; font-size: 18px; }
+
+/* v76 : suivi d'une tâche en pourcentage ou en case à cocher */
+#tkTrack { margin: 4px 0 6px; }
+#trackRow[hidden] { display: none; }
