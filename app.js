@@ -156,10 +156,6 @@ function isoWeek(d) {
   return { year: t.getUTCFullYear(), week: Math.ceil(((t - yearStart) / 86400000 + 1) / 7) };
 }
 
-// Clé de "période" : permet de rattacher une tâche à un jour, une semaine, un mois ou une année.
-  if (period === "month") return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
-  return String(d.getFullYear());
-}
 // Bornes [début, fin] de la période affichée, et chevauchement d'une tâche avec cette période
 function periodBounds(period, d) {
   if (period === "day") return [fromISO(toISO(d)), fromISO(toISO(d))];
