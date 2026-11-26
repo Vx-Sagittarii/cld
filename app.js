@@ -684,7 +684,7 @@ function viewCalendar() {
           <div class="t" ${e.google ? "" : `data-act="edit-event" data-id="${e.id}"`}><b>${esc(e.title)}</b><small>${esc(labelOf(e))}${metaOf(e).rep ? " · ↻ " + REP_LABEL[metaOf(e).rep].toLowerCase() : ""}${metaOf(e).rem !== undefined ? " · 🔔" : ""}${endDateOf(e) > e.date ? " · " + esc(fmtWhen(e)) : ""}</small></div>
           <div class="time">${endDateOf(e) > e.date ? `Jour ${Math.round((fromISO(ui.selected) - fromISO(e.date)) / 864e5) + 1}/${Math.round((fromISO(endDateOf(e)) - fromISO(e.date)) / 864e5) + 1}` : fmtWhen(e) || "Journée"}</div>
           ${e.google ? `<span class="gtag" title="Google Agenda">G</span>` : `<button class="del" data-act="del-event" data-id="${e.id}" aria-label="Supprimer">×</button>`}
-        </div>`).join("") : `<div class="empty">Rien de prévu ce jour-là. Touche « + » en haut à droite pour ajouter.</div>`}
+        </div>`).join("") : `<div class="empty">Rien de prévu ce jour-là. Touche « + » en bas à droite pour ajouter.</div>`}
     </div>
 
     ${tks.length ? `<div class="card"><h3>Tâches du jour</h3>${tks.map((t) => `
@@ -783,7 +783,7 @@ function sportGoalEditor() {
   const wend = toISO(addDays(fromISO(mon), 6)), doneK = (k) => daysOf(me, k, mon, wend).size;
   const chips = (k) => Array.from({ length: 8 }, (_, v) => `<button type="button" class="nchip ${(d[k] || 0) === v ? "on" : ""}" data-act="goal-set" data-k="${k}" data-v="${v}">${v}</button>`).join("");
   const dirty = !!ui.goalDraft && ks.some(([k]) => (d[k] || 0) !== (cur[k] || 0));
-  return `<div class="card" id="sport-goal"><h3>🎯 Objectif sport (par semaine)</h3>
+  return `<div class="card" id="sport-goal"><h3>🎯 Objectif sport par semaine · personnel</h3>
     <p class="muted">Combien de jours par semaine pour chaque activité ? La salle se compte toute seule avec Hevy, la course avec ta montre (Strava / Garmin). Tu peux aussi cocher des jours à la main dans l'onglet Sport.</p>
     ${ks.map(([k, label]) => `<div class="goal-ed"><b>${esc(label)}${k.startsWith("c_") ? ` <button type="button" class="del-mini" data-act="custom-del" data-id="${k}" aria-label="Supprimer cette activité">×</button>` : ""}</b><span>${doneK(k)} fait${doneK(k) > 1 ? "s" : ""} cette semaine · objectif ${d[k] || 0} / 7</span></div>${(cur[k] || 0) > 0 ? `<div class="mbar slim"><i style="width:${Math.min(100, Math.round((doneK(k) / cur[k]) * 100))}%;--c:${doneK(k) >= cur[k] ? "#3DDC97" : "#A45CFF"}"></i></div>` : ""}<div class="nchips">${chips(k)}</div>`).join("")}
     <div class="btn-line"><button class="btn small ${dirty ? "primary" : ""}" data-act="goal-save" ${dirty ? "" : "disabled"}>Enregistrer l'objectif</button></div>
@@ -940,7 +940,7 @@ function viewSport() {
       </div>
     </div>
     ${viewBar()}
-    ${nothing ? `<div class="card"><div class="empty">Rien n'est connecté pour l'instant. Connecte Hevy ou ta montre dans les Réglages, ou ajoute une séance à la main avec le « + » en haut à droite.</div><div class="btn-line"><button class="btn small primary" data-act="goto-watch">Ouvrir les Réglages</button></div></div>` : ""}
+    ${nothing ? `<div class="card"><div class="empty">Rien n'est connecté pour l'instant. Connecte Hevy ou ta montre dans les Réglages, ou ajoute une séance à la main avec le « + » en bas à droite.</div><div class="btn-line"><button class="btn small primary" data-act="goto-watch">Ouvrir les Réglages</button></div></div>` : ""}
     <div class="sphead">Semaine du ${dm(toISO(selMon))} au ${dm(toISO(selSun))}</div>
     <div class="spstats" style="--c:${p?.color || "#A45CFF"}">
       <div><b>${inW.length}</b><span>séance${inW.length > 1 ? "s" : ""}</span></div>
@@ -1050,7 +1050,7 @@ function viewTasks() {
 
   return `
     ${profileBar()}${chipBar()}
-    ${sportGoalEditor()}
+    ${goalsCard()}
     <div class="seg">${Object.keys(labels).map((p) => `<button class="${p === ui.period ? "on" : ""}" data-act="period" data-p="${p}">${labels[p]}</button>`).join("")}</div>
 
     <div class="card overall">
@@ -1077,9 +1077,9 @@ function viewTasks() {
             <div class="who"><span style="color:${prof(id)?.color}">${esc(prof(id)?.name || id)}${(me === PAIR[1]) === (w === "b") ? " (toi)" : ""}</span><span class="pct" data-w="${w}">${v}%</span></div>${sl(v, w, prof(id)?.color, (me === PAIR[1]) !== (w === "b"))}`).join("")
             : sl(mine(t), w1, colorOf(t))}
           <button class="btn small save-prog" data-act="save-prog" data-id="${t.id}" ${pendingProg.has(t.id) ? "" : "hidden"}>Sauvegarder</button>
-        </div>`; }).join("") || `<div class="empty">Aucune tâche ici. Touche « + » en haut à droite pour en ajouter une.</div>`}
+        </div>`; }).join("") || `<div class="empty">Aucune tâche ici. Touche « + » en bas à droite pour en ajouter une.</div>`}
     </div>
-    ${goalsCard()}`;
+    ${sportGoalEditor()}`;
 }
 
 // ----- Objectifs : vue d'ensemble (semaine / mois / année) avec échéance et % en lecture seule -----
