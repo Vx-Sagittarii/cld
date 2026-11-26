@@ -1862,7 +1862,7 @@ function importData(file) {
 }
 
 // ---------------------------------------------------------------
-// Glisser le doigt à gauche / à droite = onglet suivant / précédent (Calendrier → Tâches → Sport → Astro)
+// Glisser le doigt à gauche / à droite = flèches suivant / précédent du bandeau (mois ou période)
 // ---------------------------------------------------------------
 (function setupSwipe() {
   let x0 = 0, y0 = 0, t0 = 0, ok = false;
@@ -1875,10 +1875,9 @@ function importData(file) {
     if (!ok) return; ok = false;
     const t = e.changedTouches[0], dx = t.clientX - x0, dy = t.clientY - y0;
     if (Math.abs(dx) < 70 || Math.abs(dy) > Math.abs(dx) * 0.5 || Date.now() - t0 > 700) return; // geste horizontal, net et rapide
-    const order = [...document.querySelectorAll(".tabbar .tab")].filter((b) => !b.hidden).map((b) => b.dataset.tab);
-    const i = order.indexOf(ui.tab); if (i < 0) return; // Réglages / administration : pas de balayage
-    const n = order[i + (dx < 0 ? 1 : -1)]; if (!n) return;
-    ui.tab = n; render(true); window.scrollTo(0, 0);
+    const b = $(dx < 0 ? "#tbNext" : "#tbPrev"); // même effet que les flèches du bandeau : mois (calendrier, sport) ou période (tâches)
+    if (!b || b.hidden || ui.tab === "settings") return;
+    b.click();
   }, { passive: true });
 })();
 
