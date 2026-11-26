@@ -157,9 +157,6 @@ function isoWeek(d) {
 }
 
 // Clé de "période" : permet de rattacher une tâche à un jour, une semaine, un mois ou une année.
-function periodKey(period, d) {
-  if (period === "day") return toISO(d);
-  if (period === "week") { const w = isoWeek(d); return `${w.year}-W${pad(w.week)}`; }
   if (period === "month") return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
   return String(d.getFullYear());
 }
@@ -687,7 +684,7 @@ function viewCalendar() {
       <div class="grid cal">${cells}</div>
     </div>
 
-    ${evs.some((e) => parseTime(e.time).s !== null) ? dayStrip(evs) : ""}
+    ${evs.some((e) => parseTime(e.time)?.s != null) ? dayStrip(evs) : ""}
     <div class="card">
       <h3>${JOURS_LONG[sel.getDay()]} ${sel.getDate()} ${MOIS_LONG[sel.getMonth()]}</h3>
       ${evs.length ? evs.map((e) => `

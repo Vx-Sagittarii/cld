@@ -1,17 +1,14 @@
-# iwi2me — PWA couple (étape 1)
+# iwi2me
 
-Fichiers : index.html, style.css, app.js, sw.js, manifest.webmanifest, icons/.
-Pas de build : c'est du HTML/CSS/JS pur.
+PWA gratuite pour un couple : calendrier partagé, tâches, sport, astro. HTML/CSS/JS pur, sans build.
+Voir `CLAUDE.md` pour l'organisation du code, le déploiement et la base Supabase.
 
-## Tester sur ton ordinateur
-    python3 -m http.server 8000      # puis ouvre http://localhost:8000
+## Tester en local
+    python3 -m http.server 8000      # puis http://localhost:8000
 
-## Mettre en ligne gratuitement (GitHub Pages)
-1. Crée un dépôt GitHub public, ex. `cld`, et mets-y tous ces fichiers à la racine.
-2. Settings > Pages > Source : "Deploy from a branch" > application / (root).
-3. Ton lien : https://TON-PSEUDO.github.io/cld/
-4. Envoie-le à ta partenaire. iPhone : Safari > Partager > Sur l'écran d'accueil.
-   Android/Samsung : Chrome > Installer l'application.
+## Mettre en ligne (GitHub Pages)
+Dépôt public, Settings > Pages > « Deploy from a branch » > branche `application` / (root).
+Installation : iPhone Safari > Partager > Sur l'écran d'accueil ; Android Chrome > Installer l'application.
 
 ## Mettre à jour
-Modifie les fichiers, puis change `CACHE = "iwi2me-v1"` en v2 dans sw.js.
+Modifier les fichiers, **changer `CACHE` dans `sw.js`**, commit + push.
