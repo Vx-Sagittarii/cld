@@ -581,7 +581,7 @@ function filterBar() {
   return `<div class="seg two">${f.map(([k, l]) => `<button class="${k === ui.filter ? "on" : ""}" data-act="filter" data-f="${k}">${l}</button>`).join("")}</div>`;
 }
 function renderHero() {
-  document.querySelectorAll(".spot").forEach((s) => s.classList.toggle("active", s.dataset.id === (viewing() ? ui.viewAs : me)));
+  document.querySelectorAll(".spot").forEach((s) => s.classList.toggle("active", chipsOn() && ui.tab === "cal" ? !!ui.show[s.dataset.id] : s.dataset.id === (viewing() ? ui.viewAs : me)));
 }
 
 // ----- Mini-journée : les événements du jour en un coup d'œil -----
@@ -623,7 +623,7 @@ function dayStrip(evs) {
 // ----- Compte à rebours (événements marqués « afficher en compte à rebours ») -----
 function countdownCards() {
   const today = new Date(); today.setHours(0, 0, 0, 0);
-  const items = state.events.filter((e) => metaOf(e).cd && canSee(e)).map((e) => {
+  const items = state.events.filter((e) => metaOf(e).cd && cpass(e)).map((e) => {
     for (let i = 0; i <= 400; i++) { const iso = toISO(addDays(today, i)); if (repMatch(e, iso)) return { e, iso, i }; }
     return null;
   }).filter(Boolean).sort((a, b) => a.i - b.i).slice(0, 3);
