@@ -21,7 +21,7 @@
 html, body { margin: 0; background: var(--bg); color: var(--text);
   font-family: -apple-system, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased; }
-body { min-height: 100vh; }
+body { min-height: 100vh; min-height: 100dvh; }
 button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
 input, select { font: inherit; color: inherit; }
 
@@ -604,7 +604,7 @@ body.login .plus, body.login .plus-menu { display: none !important; }
 label.trow { cursor: pointer; }
 .sheet > label.trow { background: rgba(255,255,255,.05); border-radius: 16px; padding: 12px 14px; margin-bottom: 12px; border: 0; }
 .trow .dt { display: flex; gap: 8px; }
-.trow input[type=date], .trow input[type=time], .trow select { padding: 9px 10px; border-radius: 12px; border: 1.5px solid var(--line); background: #1A0D40; font-size: 15px; outline: none; max-width: 100%; }
+.trow input[type=date], .trow input[type=time], .trow select { padding: 9px 10px; border-radius: 12px; border: 1.5px solid var(--line); background: #1A0D40; font-size: 16px; outline: none; max-width: 100%; }
 .trow select { max-width: 60%; }
 .sheet.is-allday .tm { display: none; }
 .tgl { appearance: none; -webkit-appearance: none; width: 48px; height: 28px; border-radius: 99px; background: rgba(255,255,255,.2); position: relative; flex: none; cursor: pointer; transition: background .15s; border: 0; }
@@ -675,3 +675,8 @@ main { padding-top: calc(env(safe-area-inset-top) + 88px); }
 .task + .task{margin-top:16px;padding-top:16px;border-top:1px solid rgba(255,255,255,.07)}
 .task input[type=range]{width:100%}
 .field textarea{width:100%;box-sizing:border-box;padding:12px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:inherit;font:inherit;resize:vertical}
+
+/* v66 : audit mobile — pas de zoom iOS dans les champs, titres longs, zones tactiles */
+.field textarea,.chat-in input,.login-box input{font-size:16px}
+.task-top b{min-width:0;overflow-wrap:anywhere}
+.del-mini{position:relative}.del-mini::after{content:"";position:absolute;inset:-11px}
