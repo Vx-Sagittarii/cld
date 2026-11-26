@@ -110,8 +110,8 @@ const whoColor = (k) => k === "nous" ? nousColor() : (prof(k)?.color || "#A45CFF
 const colorOf = (it) => it.scope === "commun" && !it.google ? whoColor(whoOf(it)) : it.scope === "commun" ? nousColor() : (prof(it.owner)?.color || "#A45CFF");
 // Pastilles Moi / Sophie / Nous du calendrier (cochables) ; par défaut seul « Nous » est affiché
 const chipsOn = () => cloud && isPair(me) && !viewing();
-// « Nous » = la combinaison : tout ce qui est partagé (celui de Nelson, celui de Sophie et les événements « Nous »)
-const cpass = (it) => canSee(it) && (!chipsOn() || (ui.show.nous ? it.scope === "commun" : !!ui.show[whoOf(it)]));
+// « Nous » = ma vue d'ensemble : tout ce qui est partagé (Nelson, Sophie, « Nous ») + MES événements privés (it.period absent = événement ; les tâches privées restent dans « Moi »)
+const cpass = (it) => canSee(it) && (!chipsOn() || (ui.show.nous ? (it.scope === "commun" || (it.period === undefined && it.owner === me)) : !!ui.show[whoOf(it)]));
 // Avancement d'une tâche : en commun, moyenne de Nelson (progress) et Sophie (progress_b)
 const pendingProg = new Map(); // % modifiés mais pas encore sauvegardés
 const tp = (t) => t.scope === "commun" ? Math.round((t.progress + (t.progress_b || 0)) / 2) : t.progress;
