@@ -1360,7 +1360,7 @@ function openEventSheet(forId, edit) {
       <div class="trow"><span>Répéter</span><select id="fRep">${opt("", "Jamais", m.rep)}${Object.keys(REP_LABEL).map((k) => opt(k, REP_LABEL[k], m.rep)).join("")}</select></div>
       <div class="trow"><span>Alerte 🔔</span><select id="fRem">${opt("", "Aucune", m.rem)}${opt(0, "À l'heure", m.rem)}${opt(10, "10 minutes avant", m.rem)}${opt(60, "1 heure avant", m.rem)}${opt(1440, "1 jour avant", m.rem)}</select></div>
     </div>
-    <label class="check"><input type="checkbox" id="fCd" ${m.cd ? "checked" : ""}><span>Afficher en compte à rebours</span></label>
+    <div class="tcard"><label class="trow"><span>⭐ Événement important<small style="display:block;opacity:.65;font-size:12px;font-weight:400">Affiche le compte à rebours sur l'accueil</small></span><input type="checkbox" class="tgl" id="fCd" ${m.cd ? "checked" : ""}></label></div>
     ${edit ? `<button type="button" class="del-link" data-act="del-sheet" data-kind="event" data-id="${edit.id}">Supprimer l'événement</button>` : ""}
   </div>`;
   sheet.showModal();
