@@ -951,12 +951,12 @@ function viewSport() {
   // grille du mois
   // Types d'activité d'un jour (une pastille de couleur chacun) : salle, course, pole dance, activités perso, autres activités de montre
   const typesOn = (iso) => {
-    const t = [], ad = myActs.filter((x) => String(x.day).slice(0, 10) === iso), isRun = (x) => RUN_RE.test(String(x.kind || "").toLowerCase());
-    if (days.has(iso) || hasLog(who, iso, "gym")) t.push("gym");
+    const t = [], ad = myActs.filter((x) => String(x.day).slice(0, 10) === iso), isRun = (x) => RUN_RE.test(String(x.kind || "").toLowerCase()), isGym = (x) => /weight|strength/.test(String(x.kind || "").toLowerCase());
+    if (all.some((w) => wIso(w.day) === iso) || ad.some(isGym) || hasLog(who, iso, "gym")) t.push("gym");
     if (ad.some(isRun) || hasLog(who, iso, "run")) t.push("run");
     if (hasLog(who, iso, "pole")) t.push("pole");
     if ((state.logs || []).some((l) => l.owner === who && String(l.kind).startsWith("c_") && lday(l) === iso)) t.push("perso");
-    if (ad.some((x) => !isRun(x))) t.push("autre");
+    if (ad.some((x) => !isRun(x) && !isGym(x))) t.push("autre");
     return t;
   };
   const seenTypes = new Set();
