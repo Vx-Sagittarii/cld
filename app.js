@@ -1416,17 +1416,17 @@ function openTaskSheet(edit) {
   sheetForm.innerHTML = `<div class="sheet">
     ${sheetTop(edit ? "Modifier la tâche" : "Nouvelle tâche", "save-task")}
     <div class="field"><label>Titre</label><input type="text" id="fTitle" value="${edit ? esc(edit.title) : ""}" placeholder="Réviser le code de la route" autocomplete="off"></div>
-    <div class="seg" id="tkMode"><button type="button" data-m="span">Échéance</button><button type="button" data-m="freq">Fréquence</button></div>
-    <small class="muted" id="tkHint"></small>
-    <div class="tcard">
-      <div class="trow"><span id="lblFrom">Pour le</span><span class="dt"><input type="date" id="fDate" value="${e2}"></span></div>
-      <div class="qks" id="qkDate"><button type="button" data-q="0">Aujourd'hui</button><button type="button" data-q="1">Demain</button><button type="button" data-q="7">Dans 1 semaine</button><button type="button" data-q="30">Dans 1 mois</button></div>
-    </div>
-    <div id="rowDays" hidden><div class="qks" id="qkDays"><button type="button" data-qd="0,1,2,3,4,5,6">Tous les jours</button><button type="button" data-qd="0,1,2,3,4">En semaine</button><button type="button" data-qd="5,6">Week-end</button></div><div class="wdays">${WD.map((n, i) => `<button type="button" data-wd="${i}" class="${(tm.f || []).includes(i) ? "on" : ""}">${n}</button>`).join("")}</div></div>
     <div class="field" id="trackRow"><label>Suivi de l'avancement</label>
       <div class="seg two" id="tkTrack"><button type="button" data-t="ck">Case à cocher</button><button type="button" data-t="pct">Pourcentage</button></div>
       <small class="muted" id="trackHint"></small></div>
     <div class="field"><label>Note</label><textarea id="fNote" rows="3" maxlength="600" placeholder="Détails, lien, ce qu'il faut penser à faire…">${esc(tm.n || "")}</textarea></div>
+    <div class="seg" id="tkMode"><button type="button" data-m="span">Échéance</button><button type="button" data-m="freq">Fréquence</button></div>
+    <small class="muted" id="tkHint"></small>
+    <div class="tcard">
+      <div class="trow"><span id="lblFrom">Pour le</span><span class="dt"><input type="date" id="fDate" value="${e2}"></span></div>
+      <div class="qks one" id="qkDate"><button type="button" data-q="0">Aujourd'hui</button><button type="button" data-q="1">Demain</button><button type="button" data-q="w" aria-label="Pour la fin de la semaine">Semaine</button><button type="button" data-q="m" aria-label="Pour la fin du mois">Mois</button></div>
+    </div>
+    <div id="rowDays" hidden><div class="qks" id="qkDays"><button type="button" data-qd="0,1,2,3,4,5,6">Tous les jours</button><button type="button" data-qd="0,1,2,3,4">En semaine</button><button type="button" data-qd="5,6">Week-end</button></div><div class="wdays">${WD.map((n, i) => `<button type="button" data-wd="${i}" class="${(tm.f || []).includes(i) ? "on" : ""}">${n}</button>`).join("")}</div></div>
     <div class="tcard" id="remCard"><div class="trow"><span>🔔 Rappel</span><span class="dt"><input type="date" id="fRd" value="${tm.rd || ""}"><input type="time" id="fRt" class="tm" value="${tm.rt || ""}"></span></div></div>
     ${vis}
     ${edit ? `<button type="button" class="del-link" data-act="del-sheet" data-kind="task" data-id="${edit.id}">Supprimer la tâche</button>` : ""}
@@ -1452,7 +1452,11 @@ function openTaskSheet(edit) {
     if (q) { const set = q.dataset.qd.split(","); $("#rowDays").querySelectorAll("button[data-wd]").forEach((x) => x.classList.toggle("on", set.includes(x.dataset.wd))); }
     else if (b) b.classList.toggle("on");
   });
-  $("#qkDate").addEventListener("click", (ev) => { const b = ev.target.closest("button[data-q]"); if (b) $("#fDate").value = toISO(addDays(new Date(), Number(b.dataset.q))); });
+  // Pastilles : la date d'échéance en un clic (fin de semaine = dimanche, fin de mois = dernier jour). Celle qui correspond à la date choisie est cochée.
+  const qDate = (q) => { const t = new Date(); return toISO(q === "w" ? addDays(t, 6 - ((t.getDay() + 6) % 7)) : q === "m" ? new Date(t.getFullYear(), t.getMonth() + 1, 0) : addDays(t, Number(q))); };
+  const markQ = () => { let hit = false; $("#qkDate").querySelectorAll("button").forEach((b) => { const on = !hit && qDate(b.dataset.q) === $("#fDate").value; if (on) hit = true; b.classList.toggle("on", on); }); };
+  $("#qkDate").addEventListener("click", (ev) => { const b = ev.target.closest("button[data-q]"); if (b) { $("#fDate").value = qDate(b.dataset.q); markQ(); } });
+  $("#fDate").addEventListener("input", markQ); $("#fDate").addEventListener("change", markQ); markQ();
   if (!edit) setTimeout(() => $("#fTitle").focus(), 50);
 }
 

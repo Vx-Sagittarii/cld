@@ -763,3 +763,8 @@ button.chip-glass.zoom { min-width: 40px; min-height: 40px; display: inline-flex
 /* v76 : suivi d'une tâche en pourcentage ou en case à cocher */
 #tkTrack { margin: 4px 0 6px; }
 #trackRow[hidden] { display: none; }
+
+/* v78 : pastilles de date sur une ligne, cochables */
+.qks.one { flex-wrap: nowrap; gap: 5px; overflow-x: auto; }
+.qks.one button { padding: 6px 10px; font-size: 13px; white-space: nowrap; flex: 1 1 auto; }
+.qks button.on { background: #38227A; color: #fff; border-color: #8B5CF6; }
