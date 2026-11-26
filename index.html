@@ -22,6 +22,12 @@
   <button data-tab="settings" class="tab gear" id="gearBtn" aria-label="Réglages">
     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 14.5a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3h0a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5h0a1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8v0a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z"/></svg>
   </button>
+  <button type="button" class="plus" id="plusBtn" data-act="plus-menu" aria-label="Ajouter" aria-haspopup="true"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+  <div class="plus-menu" id="plusMenu" hidden>
+    <button type="button" data-act="new-event"><span>📅</span>Événement</button>
+    <button type="button" id="mTask" data-act="new-task"><span>✅</span>Tâche</button>
+    <button type="button" id="mSport" data-act="new-sport"><span>🏋️</span>Séance de sport</button>
+  </div>
     <!-- Bandeau photo animé (hors de #view pour que l'animation ne redémarre pas à chaque clic) -->
     <section class="hero" id="hero" aria-label="Illustration iwi2me, painting session">
       <div class="hero-media" id="heroMedia"><img src="img/scene.svg" alt="Illustration anime : pique-nique de nuit au bord de l'eau, iwi2me painting session" decoding="async"></div>

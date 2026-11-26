@@ -102,7 +102,14 @@ const canSee = (it) => viewing() ? (it.scope === "commun" && (!it.google || it.o
 // Deux volets : « Perso » = tout ce que je vois (privé + public avec l'autre) ; « Commun » = seulement le public
 const passes = (it) => canSee(it) && (viewing() || !isPair(me) || ui.filter !== "commun" || it.scope === "commun");
 const persoView = () => isPair(me) && !viewing() && ui.filter !== "commun";
-const colorOf = (it) => it.scope === "commun" ? (document.body.classList.contains("noel") ? "#FF5A6E" : COMMUN_COLOR) : (prof(it.owner)?.color || "#A45CFF");
+// « Qui » est concerné : une personne (privé = propriétaire ; commun avec meta.w = pour cette personne) ou « nous » (commun)
+const whoOf = (it) => it.google ? it.owner : it.scope === "commun" ? (metaOf(it).w || "nous") : it.owner;
+const nousColor = () => document.body.classList.contains("noel") ? "#FF5A6E" : COMMUN_COLOR;
+const whoColor = (k) => k === "nous" ? nousColor() : (prof(k)?.color || "#A45CFF");
+const colorOf = (it) => it.scope === "commun" && !it.google ? whoColor(whoOf(it)) : it.scope === "commun" ? nousColor() : (prof(it.owner)?.color || "#A45CFF");
+// Pastilles Moi / Sophie / Nous du calendrier (cochables) ; par défaut seul « Nous » est affiché
+const chipsOn = () => cloud && isPair(me) && !viewing();
+const cpass = (it) => canSee(it) && (!chipsOn() || !!ui.show[whoOf(it)]);
 // Avancement d'une tâche : en commun, moyenne de Nelson (progress) et Sophie (progress_b)
 const pendingProg = new Map(); // % modifiés mais pas encore sauvegardés
 const tp = (t) => t.scope === "commun" ? Math.round((t.progress + (t.progress_b || 0)) / 2) : t.progress;
@@ -110,7 +117,7 @@ const tp = (t) => t.scope === "commun" ? Math.round((t.progress + (t.progress_b 
 const myField = (t) => (t.scope === "commun" && me === PAIR[1]) ? "progress_b" : "progress";
 const mine = (t) => t[myField(t)] || 0;
 const shown = (t) => persoView() ? mine(t) : tp(t); // volet Perso : seulement mon %, volet Commun : la moyenne
-const labelOf = (it) => (it.google && it.owner !== me) ? `${prof(it.owner)?.name || "L'autre"} · Google` : persoView() ? (it.scope === "commun" ? "👥 Public" : "🔒 Privé") : (it.scope === "commun" ? "Commun" : (prof(it.owner)?.name || "?"));
+const labelOf = (it) => (it.google && it.owner !== me) ? `${prof(it.owner)?.name || "L'autre"} · Google` : it.scope === "commun" ? (metaOf(it).w ? (prof(metaOf(it).w)?.name || "?") : "Nous") : (isPair(me) ? "🔒 Privé" : (prof(it.owner)?.name || "?"));
 
 // État de l'interface (non sauvegardé)
 const TABS_OK = ["cal", "tasks", "sport", "astro", "settings"];
@@ -120,11 +127,12 @@ const ui = {
   admin: savedNav.admin === true,
   viewAs: null,
   goalDraft: null,
-  bodyP: "month",
+  bodyP: "week",
   selected: toISO(new Date()),
   month: startOfMonth(new Date()),
   period: "day",
-  filter: "perso" // perso | commun
+  filter: "commun", // perso | commun (onglet Tâches) : « Nous » par défaut
+  show: { nous: true } // pastilles du calendrier : { nous, <moi>, <partenaire> }
 };
 
 // ---------------------------------------------------------------
@@ -388,6 +396,8 @@ function render(animate = false) {
   document.body.classList.toggle("login", needLogin || (loaded && needPseudo));
   if (needLogin) { view.innerHTML = viewLogin(); hero.classList.add("off"); return; }
   if (loaded && needPseudo) { if (!$("#psName")) view.innerHTML = viewPseudo(); hero.classList.add("off"); return; } // pseudo obligatoire avant tout le reste
+  if (ui.tab === "cal") ui.viewAs = null; // le calendrier se règle avec les pastilles Moi / Sophie / Nous
+  $("#plusBtn").hidden = ui.tab === "settings"; $("#mTask").hidden = permOff("tasks"); $("#mSport").hidden = permOff("sport");
   if (permOff(ui.tab)) { ui.tab = "cal"; toast("Cette fonction est désactivée pour ton profil. Demande à Nelson pour l'activer."); }
   document.querySelectorAll(".tab").forEach((t) => { t.classList.toggle("on", t.dataset.tab === ui.tab); t.hidden = permOff(t.dataset.tab); });
   document.body.classList.toggle("solo", cloud && !isNS(me));
@@ -611,47 +621,53 @@ function countdownCards() {
 }
 
 // ----- Calendrier -----
+// Pastilles cochables : Moi / Sophie / Nous (cloud, Nelson et Sophie)
+function chipBar() {
+  if (!chipsOn()) return "";
+  const pid = partnerId(), items = [[me, "Moi"], [pid, prof(pid)?.name || "Partenaire"], ["nous", "Nous"]];
+  return `<div class="chips3">${items.map(([k, l]) => `<button type="button" class="c3 ${ui.show[k] ? "on" : ""}" style="--c:${whoColor(k)}" data-act="show-toggle" data-k="${k}" aria-pressed="${!!ui.show[k]}"><span class="ck">${ui.show[k] ? "✓" : ""}</span>${esc(l)}</button>`).join("")}</div>`;
+}
 function viewCalendar() {
   const m = ui.month, today = toISO(new Date());
   const EV = allEvents(), dec = isDec();
   const first = mondayOf(m); // on commence à la semaine qui contient le 1er du mois
+  const startKey = (e) => { const p = segFor(e, e.date); return p ? p.s : -1; };
   let cells = "";
   for (let i = 0; i < 42; i++) {
     const d = addDays(first, i), iso = toISO(d);
     if (i >= 35 && d.getMonth() !== m.getMonth()) break; // pas de 6e ligne inutile
-    // Pastilles de couleur : qui a quelque chose ce jour-là ?
-    const cols = new Set([
-      ...EV.filter((e) => onDay(e, iso) && passes(e)).map(colorOf),
-      ...state.tasks.filter((t) => t.period === "day" && t.key === iso && passes(t)).map(colorOf)
-    ]);
-    const dots = [...cols].slice(0, 3).map((c) => `<i class="dot" style="background:${c}"></i>`).join("");
     const inMonth = d.getMonth() === m.getMonth();
+    // Événements du jour (titres dans la case) : journée entière d'abord, puis par heure
+    const evd = EV.map((e) => inst(e, iso)).filter((e) => e && cpass(e)).sort((a, b) => (segFor(a, iso)?.s ?? -1) - (segFor(b, iso)?.s ?? -1));
+    const tcols = [...new Set(state.tasks.filter((t) => t.period === "day" && t.key === iso && cpass(t)).map(colorOf))].slice(0, 3);
+    const bars = evd.slice(0, 3).map((e) => `<i class="eb" style="--c:${colorOf(e)}">${esc(e.title)}</i>`).join("");
+    const more = evd.length > 3 ? `<small class="more">Encore ${evd.length - 3}</small>` : "";
     const door = dec && inMonth && d.getDate() <= 25;
-    const has = door && EV.some((e) => onDay(e, iso) && passes(e));
-    const cls = ["day", !inMonth ? "out" : "", iso === today ? "today" : "", iso === ui.selected ? "sel" : "",
+    const has = door && evd.length > 0;
+    const cls = ["day", "cal", !inMonth ? "out" : "", iso === today ? "today" : "", iso === ui.selected ? "sel" : "",
       door ? "door" : "", door && d.getDate() % 2 ? "odd" : "", has ? "open" : "", dec && inMonth && d.getDate() === 24 ? "eve" : ""].join(" ");
-    cells += `<button class="${cls}" data-act="pick" data-date="${iso}">${d.getDate()}<span class="dots">${dots}</span></button>`;
+    cells += `<div role="button" tabindex="0" class="${cls}" data-act="pick" data-date="${iso}"><span class="dn">${d.getDate()}<span class="dots">${tcols.map((c) => `<i class="dot" style="background:${c}"></i>`).join("")}</span></span>${bars}${more}</div>`;
   }
 
   const sel = fromISO(ui.selected);
-  const evs = EV.map((e) => inst(e, ui.selected)).filter((e) => e && passes(e)).sort((a, b) => (segFor(a, ui.selected)?.s ?? -1) - (segFor(b, ui.selected)?.s ?? -1));
-  const tks = state.tasks.filter((t) => t.period === "day" && t.key === ui.selected && passes(t));
+  const evs = EV.map((e) => inst(e, ui.selected)).filter((e) => e && cpass(e)).sort((a, b) => (segFor(a, ui.selected)?.s ?? -1) - (segFor(b, ui.selected)?.s ?? -1));
+  const tks = state.tasks.filter((t) => t.period === "day" && t.key === ui.selected && cpass(t));
 
   return `
     <div class="head">
-      <div><h1>${MOIS_LONG[m.getMonth()]} ${m.getFullYear()}</h1><div class="sub">Calendrier de ${esc(prof(viewing() ? ui.viewAs : me).name)}</div></div>
+      <div><h1>${MOIS_LONG[m.getMonth()]} ${m.getFullYear()}</h1></div>
       <div class="nav">
         <button class="icon-btn nav-btn" data-act="month" data-dir="-1" aria-label="Mois précédent" title="Mois précédent"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg></button>
         <button class="icon-btn nav-btn" data-act="month" data-dir="1" aria-label="Mois suivant" title="Mois suivant"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>
       </div>
     </div>
-    ${profileBar()}${viewBar()}${filterBar()}
+    ${profileBar()}${chipBar()}
     ${countdownCards()}
     ${dec ? adventCountdown() : ""}
     ${gcal.on && !gcal.token ? `<button class="add-btn gre" data-act="gcal-connect-silent">Reconnecter Google Agenda</button>` : ""}
-    <div class="card ${dec ? "advent-grid" : ""}">
+    <div class="card calcard ${dec ? "advent-grid" : ""}">
       <div class="dow"><span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span></div>
-      <div class="grid">${cells}</div>
+      <div class="grid cal">${cells}</div>
     </div>
 
     ${dayStrip(evs)}
@@ -663,14 +679,13 @@ function viewCalendar() {
           <div class="t" ${e.google ? "" : `data-act="edit-event" data-id="${e.id}"`}><b>${esc(e.title)}</b><small>${esc(labelOf(e))}${metaOf(e).rep ? " · ↻ " + REP_LABEL[metaOf(e).rep].toLowerCase() : ""}${metaOf(e).rem !== undefined ? " · 🔔" : ""}${endDateOf(e) > e.date ? " · " + esc(fmtWhen(e)) : ""}</small></div>
           <div class="time">${endDateOf(e) > e.date ? `Jour ${Math.round((fromISO(ui.selected) - fromISO(e.date)) / 864e5) + 1}/${Math.round((fromISO(endDateOf(e)) - fromISO(e.date)) / 864e5) + 1}` : fmtWhen(e) || "Journée"}</div>
           ${e.google ? `<span class="gtag" title="Google Agenda">G</span>` : `<button class="del" data-act="del-event" data-id="${e.id}" aria-label="Supprimer">×</button>`}
-        </div>`).join("") : `<div class="empty">Rien de prévu ce jour-là.</div>`}
-      <button class="add-btn" data-act="new-event">+ Ajouter un événement</button>
+        </div>`).join("") : `<div class="empty">Rien de prévu ce jour-là. Touche « + » en haut à droite pour ajouter.</div>`}
     </div>
 
     ${tks.length ? `<div class="card"><h3>Tâches du jour</h3>${tks.map((t) => `
       <div class="row">
         <div class="bar-owner" style="background:${colorOf(t)}"></div>
-        <div class="t"><b>${esc(t.title)}</b><small>${esc(labelOf(t))}</small></div>
+        <div class="t" data-act="edit-task" data-id="${t.id}" style="cursor:pointer"><b>${esc(t.title)}</b><small>${esc(labelOf(t))}</small></div>
         <div class="time">${persoView() ? mine(t) + "%" : t.scope === "commun" ? `${prof(PAIR[0])?.name[0] || "A"} ${t.progress}% · ${prof(PAIR[1])?.name[0] || "B"} ${t.progress_b || 0}%` : t.progress + "%"}</div>
       </div>`).join("")}</div>` : ""}
 
@@ -687,7 +702,7 @@ async function syncHevy(manual, full) {
   if (!cloud || hevyBusy) return;
   const last = Number(sessionStorage.getItem("iwi2me-hevy-sync") || 0);
   if (!manual && Date.now() - last < 10 * 60 * 1000) return; // au plus une synchro toutes les 10 min en automatique
-  hevyBusy = true; if (manual) { toast("Synchronisation Hevy…"); }
+  hevyBusy = true; if (manual) { toast("Synchronisation Hevy…"); render(); }
   try {
     const r = await fetch(`${CFG.url}/functions/v1/hevy-sync`, { method: "POST", headers: { "Content-Type": "application/json", apikey: CFG.key }, body: JSON.stringify({ token, full: !!full }) });
     const d = await r.json();
@@ -736,22 +751,22 @@ function manualBtns(who, iso) {
   return ks.filter(([k]) => hasLog(who, iso, k)).map(([, label]) => `<div class="empty">${esc(label)} ce jour</div>`).join("");
 }
 // Carte « objectif de la semaine » : avancement + résultat des semaines passées
-function sportGoalCard(who) {
+function sportGoalCard(who, monIso) {
   const p = prof(who), col = p?.color || "#A45CFF", own = who === me && !viewing();
-  const mon = weekMon(toISO(new Date())), st = weekStats(who, mon);
+  const mon = monIso || weekMon(toISO(new Date())), st = weekStats(who, mon), isNow = mon === weekMon(toISO(new Date()));
   let body;
   if (!st.has) body = `<div class="empty">${own ? "Pas encore d'objectif sport." : "Aucun objectif défini."}</div>`;
   else {
     const left = 7 - ((new Date().getDay() + 6) % 7) - 1;
     body = st.items.map((i) => goalBar(i.label, i.done, i.goal, col, own ? i.k : "")).join("")
-      + `<small class="muted">${st.ok ? "Objectif de la semaine atteint 🎉" : left > 0 ? `Encore ${left} jour${left > 1 ? "s" : ""} pour y arriver` : "Dernier jour de la semaine"}</small>`;
+      + `<small class="muted">${st.ok ? "Objectif de la semaine atteint 🎉" : !isNow ? (mon > weekMon(toISO(new Date())) ? "Semaine à venir" : "Objectif manqué cette semaine-là") : left > 0 ? `Encore ${left} jour${left > 1 ? "s" : ""} pour y arriver` : "Dernier jour de la semaine"}</small>`;
   }
   const hist = [];
   for (let i = 1; i <= 6; i++) { const m = toISO(addDays(fromISO(mon), -7 * i)), r = weekStats(who, m); if (r.has) hist.push({ m, r }); }
   const last = hist.find((h) => h.m === toISO(addDays(fromISO(mon), -7)));
   const lastTxt = last ? `<div class="lastweek ${last.r.ok ? "ok" : "ko"}">Semaine dernière : ${last.r.ok ? "objectif réussi ✓" : "objectif manqué"} <small>(${esc(sumTxt(last.r))})</small></div>` : "";
   const chips = hist.length ? `<div class="hist">${hist.reverse().map((h) => `<span class="hc ${h.r.ok ? "ok" : "ko"}" title="Semaine du ${dm(h.m)} : ${esc(sumTxt(h.r))}"><b>${h.r.ok ? "✓" : "✗"}</b><i>${dm(h.m)}</i></span>`).join("")}</div>` : "";
-  return `<div class="card goalcard"><h3>🎯 Objectif sport de la semaine · ${esc(p?.name || "")}</h3><small class="muted wkrange">Du ${dm(mon)} au ${dm(toISO(addDays(fromISO(mon), 6)))}</small>${body}${lastTxt}${chips}
+  return `<div class="card goalcard"><h3>🎯 Objectif sport ${isNow ? "de la semaine" : "de la semaine choisie"} · ${esc(p?.name || "")}</h3><small class="muted wkrange">Du ${dm(mon)} au ${dm(toISO(addDays(fromISO(mon), 6)))}</small>${body}${lastTxt}${chips}
     ${own ? `<div class="btn-line"><button class="btn small" data-act="goto-goal">${st.has ? "Modifier mon objectif" : "Définir mon objectif"}</button></div>` : ""}</div>`;
 }
 // Éditeur de l'objectif (onglet Tâches) : « x / 7 jours » pour chaque activité, + activités perso
@@ -791,7 +806,7 @@ function sportCard(inTab) {
   const myW = (state.workouts || []).filter((w) => w.owner === who && w.day === day);
   const myA = (state.acts || []).filter((a) => a.owner === who && lday(a) === day);
   const used = new Set();
-  const tg = targetsOf(goalFor(who, weekMon(toISO(new Date())))), hasGoal = Object.values(tg).some((v) => v > 0);
+  const tg = targetsOf(goalFor(who, weekMon(inTab ? day : toISO(new Date())))), hasGoal = Object.values(tg).some((v) => v > 0);
   const seen = (k) => k === "gym" ? (myW.length > 0 || hasLog(who, day, k)) : k === "run" ? (myA.some((a) => RUN_RE.test(String(a.kind || "").toLowerCase())) || hasLog(who, day, k)) : hasLog(who, day, k);
   const rows = kindsOf(who).filter(([k]) => !hasGoal || (tg[k] || 0) > 0 || seen(k)).map(([k, label]) => {
     if (k === "gym") {
@@ -818,11 +833,11 @@ function sportCard(inTab) {
   const other = !viewing() ? (state.workouts || []).filter((w) => w.owner !== me && isPair(w.owner) && w.day === day) : [];
   const oHtml = other.map((w) => `<div class="row"><div class="bar-owner" style="background:${prof(w.owner)?.color || "#888"}"></div><div class="t"><b>🏋️ ${esc(w.title)}</b><small>${esc(prof(w.owner)?.name || "")} · ${[fmtDur(w.start, w.end), w.ex.length + (w.ex.length > 1 ? " exos" : " exo"), w.sets + (w.sets > 1 ? " séries" : " série")].filter(Boolean).join(" · ")}</small></div></div>`).join("");
   const ago = hevySyncAt ? new Date(hevySyncAt).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
-  const refresh = (hevyOn || (state.watch || []).some((w) => w.linked)) && own ? `<button class="btn small" data-act="hevy-refresh">↻ Actualiser mes séances</button>` : "";
+  const refresh = ""; // l'actualisation se fait avec l'icône ↻ en haut de l'onglet Sport
   const hint = !hevyOn && own && !(state.watch || []).length ? `<small class="muted">Connecte Hevy ou ta montre dans Réglages pour que les séances se cochent toutes seules.</small>` : "";
   return `<div class="card"><h3>${inTab ? JOURS_LONG[fromISO(day).getDay()] + " " + fromISO(day).getDate() + " " + MOIS_LONG[fromISO(day).getMonth()] : "Sport"}${wp && viewing() ? " · " + esc(wp.name) : ""}</h3>
     <div class="chks">${rows.join("")}</div>${oHtml}${hint}
-    ${refresh ? `<div class="btn-line" style="margin-top:8px">${refresh}</div>` : ""}${refresh && ago ? `<small class="muted">Mis à jour ${ago}</small>` : ""}</div>${cloud && !permOff("sport") && !inTab ? sportGoalCard(who) : ""}`;
+    ${own && ago ? `<small class="muted">Séances mises à jour le ${ago}</small>` : ""}</div>${cloud && !permOff("sport") && !inTab ? sportGoalCard(who) : ""}`;
 }
 
 // ----- Onglet Sport : séances Hevy du mois (par personne) -----
@@ -897,7 +912,7 @@ function viewSport() {
     const d = addDays(first, i), iso = toISO(d);
     if (i >= 35 && d.getMonth() !== mo) break;
     const n = days.get(iso) || 0, inMonth = d.getMonth() === mo;
-    cells += `<button class="day sp ${!inMonth ? "out" : ""} ${n ? "went" : ""} ${anyLog(who, iso) ? "pole" : ""} ${actDays.has(iso) ? "act" : ""} ${iso === toISO(today) ? "today" : ""} ${iso === ui.selected ? "sel" : ""}" style="--c:${p?.color || "#A45CFF"}" data-act="pick" data-date="${iso}">${d.getDate()}${n > 1 ? `<span class="cnt">${n}</span>` : ""}</button>`;
+    cells += `<button class="day sp ${!inMonth ? "out" : ""} ${iso >= toISO(selMon) && iso <= toISO(selSun) ? "inwk" : ""} ${n ? "went" : ""} ${anyLog(who, iso) ? "pole" : ""} ${actDays.has(iso) ? "act" : ""} ${iso === toISO(today) ? "today" : ""} ${iso === ui.selected ? "sel" : ""}" style="--c:${p?.color || "#A45CFF"}" data-act="pick" data-date="${iso}">${d.getDate()}${n > 1 ? `<span class="cnt">${n}</span>` : ""}</button>`;
   }
   const dayWs = all.filter((w) => wIso(w.day) === ui.selected);
   const dayActs = myActs.filter((a) => String(a.day).slice(0, 10) === ui.selected);
@@ -905,17 +920,32 @@ function viewSport() {
   const manualM = (state.logs || []).filter((l) => l.owner === who && String(l.day).slice(0, 7) === y + "-" + pad(mo + 1));
   const manualTxt = manualKinds(who).map(([k, label]) => { const n = new Set(manualM.filter((l) => l.kind === k).map(lday)).size; return n ? `${label} <b>${n}</b>` : ""; }).filter(Boolean).join(" · ");
   const poleOwn = manualBtns(who, ui.selected);
-  const noKey = who === me && !hevyOn;
+  const nothing = who === me && !viewing() && !hevyOn && !(state.watch || []).length; // rien de connecté
+  const canRefresh = who === me && !viewing() && (hevyOn || (state.watch || []).some((w) => w.linked));
+  // Semaine du jour choisi : séances, effort, volume, jours actifs
+  const inW = all.filter((w) => { const k = wIso(w.day); return k >= toISO(selMon) && k <= toISO(selSun); });
+  const wMins = inW.reduce((t, w) => t + (w.start && w.end ? Math.max(0, Math.round((new Date(w.end) - new Date(w.start)) / 60000)) : 0), 0), wVol = inW.reduce((t, w) => t + (w.vol || 0), 0);
+  let wDays = 0; for (let k = 0; k < 7; k++) { const iso = toISO(addDays(selMon, k)); if (days.has(iso) || anyLog(who, iso) || actDays.has(iso)) wDays++; }
+  const fmtMin = (n) => n >= 60 ? Math.floor(n / 60) + " h " + String(n % 60).padStart(2, "0") : n + " min";
   return `
     <div class="head">
       <div><h1>Sport</h1><div class="sub">${MOIS_LONG[mo]} ${y} · ${esc(p?.name || "")}</div></div>
       <div class="nav">
+        ${canRefresh ? `<button class="icon-btn nav-btn ${hevyBusy ? "spin" : ""}" data-act="hevy-refresh" aria-label="Actualiser mes séances" title="Actualiser mes séances"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v5h-5"/></svg></button>` : ""}
         <button class="icon-btn nav-btn" data-act="month" data-dir="-1" aria-label="Mois précédent"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg></button>
         <button class="icon-btn nav-btn" data-act="month" data-dir="1" aria-label="Mois suivant"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>
       </div>
     </div>
     ${viewBar()}
-    ${noKey ? `<div class="card"><div class="empty">Connecte Hevy dans Réglages pour voir tes séances ici.</div></div>` : ""}
+    ${nothing ? `<div class="card"><div class="empty">Rien n'est connecté pour l'instant. Connecte Hevy ou ta montre dans les Réglages, ou ajoute une séance à la main avec le « + » en haut à droite.</div><div class="btn-line"><button class="btn small primary" data-act="goto-watch">Ouvrir les Réglages</button></div></div>` : ""}
+    <div class="sphead">Semaine du ${dm(toISO(selMon))} au ${dm(toISO(selSun))}</div>
+    <div class="spstats" style="--c:${p?.color || "#A45CFF"}">
+      <div><b>${inW.length}</b><span>séance${inW.length > 1 ? "s" : ""}</span></div>
+      <div><b>${wDays}</b><span>jour${wDays > 1 ? "s" : ""} actif${wDays > 1 ? "s" : ""}</span></div>
+      <div><b>${fmtMin(wMins)}</b><span>d'effort</span></div>
+      <div><b>${wVol ? fmtVol(wVol) : "–"}</b><span>soulevé</span></div>
+    </div>
+    <div class="sphead">${MOIS_LONG[mo]} ${y}</div>
     <div class="spstats" style="--c:${p?.color || "#A45CFF"}">
       <div><b>${inM.length}</b><span>séance${inM.length > 1 ? "s" : ""}</span></div>
       <div><b>${String(perWeek).replace(".", ",")}</b><span>par semaine</span></div>
@@ -923,7 +953,7 @@ function viewSport() {
       <div><b>${vol ? fmtVol(vol) : "–"}</b><span>soulevé</span></div>
     </div>
     ${manualTxt ? `<div class="polecount">${manualTxt} <small>ce mois-ci (jours saisis à la main)</small></div>` : ""}
-    ${cloud && !permOff("sport") ? sportGoalCard(who) : ""}
+    ${cloud && !permOff("sport") ? sportGoalCard(who, toISO(selMon)) : ""}
     <div class="card">
       <h3>Jours d'entraînement <small class="legend"><i class="lg gym"></i>salle <i class="lg pole"></i>saisi <i class="lg act"></i>montre</small></h3>
       <div class="dow"><span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span></div>
@@ -931,7 +961,7 @@ function viewSport() {
     </div>
     <div class="card">
       <h3>Séances par semaine</h3>
-      <div class="wkbars">${[...wk.entries()].map(([k, n]) => `<div class="wk"><div class="wkb"><i style="height:${Math.round((n / wmax) * 100)}%;--c:${p?.color || "#A45CFF"}"></i></div><b>${n}</b><span>${dm(k)}</span></div>`).join("")}</div>
+      <div class="wkbars">${[...wk.entries()].map(([k, n]) => `<button type="button" class="wk ${k === toISO(selMon) ? "sel" : ""}" data-act="pick" data-date="${k}"><div class="wkb"><i style="height:${Math.round((n / wmax) * 100)}%;--c:${p?.color || "#A45CFF"}"></i></div><b>${n}</b><span>${dm(k)}</span></button>`).join("")}</div>
     </div>
     <div class="card">
       <h3>Muscles sollicités</h3>
@@ -1045,14 +1075,13 @@ function viewTasks() {
             <b>${esc(t.title)}</b>
             ${persoView() ? `<small class="vis">${labelOf(t)}</small>` : ""}
             ${two ? "" : `<span class="pct" data-w="${w1}">${mine(t)}%</span>`}
-            <button class="del" data-act="del-task" data-id="${t.id}" aria-label="Supprimer">×</button>
+            <button class="edit-mini" data-act="edit-task" data-id="${t.id}" aria-label="Modifier la tâche">✎</button><button class="del" data-act="del-task" data-id="${t.id}" aria-label="Supprimer">×</button>
           </div>
           ${two ? [[PAIR[0], "a", t.progress], [PAIR[1], "b", t.progress_b || 0]].map(([id, w, v]) => `
             <div class="who"><span style="color:${prof(id)?.color}">${esc(prof(id)?.name || id)}${(me === PAIR[1]) === (w === "b") ? " (toi)" : ""}</span><span class="pct" data-w="${w}">${v}%</span></div>${sl(v, w, prof(id)?.color, (me === PAIR[1]) !== (w === "b"))}`).join("")
             : sl(mine(t), w1, colorOf(t))}
           <button class="btn small save-prog" data-act="save-prog" data-id="${t.id}" ${pendingProg.has(t.id) ? "" : "hidden"}>Sauvegarder</button>
-        </div>`; }).join("") || `<div class="empty">Ajoute une première tâche.</div>`}
-      <button class="add-btn" data-act="new-task">+ Ajouter une tâche</button>
+        </div>`; }).join("") || `<div class="empty">Aucune tâche ici. Touche « + » en haut à droite pour en ajouter une.</div>`}
     </div>
     ${goalsCard()}`;
 }
@@ -1079,14 +1108,14 @@ function goalsCard() {
     ${goals.map(({ t, d }) => {
       const left = Math.round((d - today) / 864e5), p = shown(t);
       const when = left === 0 ? "aujourd'hui" : left === 1 ? "demain" : `dans ${left} j`;
-      return `<button class="goal ${p >= 100 ? "done" : left <= 3 ? "soon" : ""}" data-act="goto-task" data-id="${t.id}">
+      return `<div class="goalw"><button class="goal ${p >= 100 ? "done" : left <= 3 ? "soon" : ""}" data-act="goto-task" data-id="${t.id}">
         <i class="chip" style="background:${colorOf(t)}"></i>
         <div class="g-t"><b>${esc(t.title)}</b>
           <small>${PL[t.period]}${persoView() ? " · " + labelOf(t) : ""} · échéance ${d.getDate()} ${MOIS[d.getMonth()]} (${when})</small>
           <div class="g-bar"><span style="width:${p}%;background:${colorOf(t)}"></span></div></div>
-        <span class="g-pct">${p >= 100 ? "✓" : p + "%"}</span><span class="g-go" aria-hidden="true">›</span></button>`;
+        <span class="g-pct">${p >= 100 ? "✓" : p + "%"}</span></button><button type="button" class="edit-mini abs" data-act="edit-task" data-id="${t.id}" aria-label="Modifier cet objectif">✎</button></div>`;
     }).join("")}
-    <small class="muted">Touche un objectif pour modifier son avancement.</small></div>`;
+    <small class="muted">Touche un objectif pour modifier son avancement, ✎ pour changer son titre, sa date ou sa visibilité.</small></div>`;
 }
 
 // ----- Rappels par notification (Web Push) -----
@@ -1260,76 +1289,115 @@ const visField = () => isPair(me) ? visSwitch("fVis", "commun", "perso", ui.filt
 const scopeField = (forId) => isPair(me) ? visSwitch("fScope", "commun", forId || me, !forId) : "";
 // Modification : passer un événement de Public à Privé (toi) ou inversement
 const visEditField = (e) => (isPair(me) && (e.scope === "commun" || e.owner === me)) ? visSwitch("fScope", "commun", me, e.scope === "commun") : "";
-// Renvoie { owner, scope } selon le choix du champ « Pour »
-function readFor() {
-  const v = $("#fScope") ? $("#fScope").value : me;
-  return v === "commun" ? { owner: me, scope: "commun" } : { owner: v, scope: "perso" };
+// Renvoie { owner, scope, w } selon le choix Moi / Sophie / Nous
+//  Moi (privé) = calendrier perso · Moi (non privé) et Sophie = commun avec meta.w (couleur de la personne) · Nous = commun
+function readWho() {
+  if (!isPair(me) || !$("#fWho")) return { owner: me, scope: "perso" };
+  const v = $("#fWho").value;
+  if (v === "nous") return { owner: me, scope: "commun" };
+  if (v === "partner") return { owner: me, scope: "commun", w: partnerId() };
+  return $("#fPriv").checked ? { owner: me, scope: "perso" } : { owner: me, scope: "commun", w: me };
 }
-function notifyFor(f) {
-  if (f.scope === "perso" && f.owner !== me) toast(`Ajouté au calendrier de ${(prof(f.owner) || {}).name || "l'autre"}`);
+function notifyFor(f) {}
+// En-tête de feuille : croix à gauche, titre, validation à droite
+const sheetTop = (title, act) => `<div class="sheet-top"><button type="button" class="rbtn x" data-act="close" aria-label="Annuler">✕</button><h2>${title}</h2><button type="button" class="rbtn ok" data-act="${act}" aria-label="Valider">✓</button></div>`;
+function whoField(cur, priv) {
+  if (!isPair(me)) return "";
+  const pid = partnerId(), opts = [["me", "Moi"], ["partner", prof(pid)?.name || "Partenaire"], ["nous", "Nous"]];
+  return `<input type="hidden" id="fWho" value="${cur}">
+    <div class="seg three whoseg">${opts.map(([v, l]) => `<button type="button" class="${v === cur ? "on" : ""}" data-act="who-pick" data-v="${v}">${esc(l)}</button>`).join("")}</div>
+    <label class="trow" id="privRow" ${cur === "me" ? "" : "hidden"}><span>Privé (toi seul le vois)</span><input type="checkbox" class="tgl" id="fPriv" ${priv ? "checked" : ""}></label>`;
 }
 
 // Message d'erreur visible DANS la fenêtre (le toast passe derrière un <dialog>)
 function sheetErr(msg) {
   let e = $("#sheetErr");
-  if (!e) { e = document.createElement("div"); e.id = "sheetErr"; e.className = "sheet-err"; const a = sheetForm.querySelector(".actions"); a.parentNode.insertBefore(e, a); }
+  if (!e) { e = document.createElement("div"); e.id = "sheetErr"; e.className = "sheet-err"; const a = sheetForm.querySelector(".actions") || sheetForm.querySelector(".sheet-top"); if (a.classList.contains("actions")) a.parentNode.insertBefore(e, a); else a.parentNode.insertBefore(e, a.nextSibling); }
   e.textContent = msg;
 }
 
 function openEventSheet(forId, edit) {
   const p = edit ? parseTime(edit.time) : null, m = edit ? metaOf(edit) : {};
-  const v = { title: edit ? edit.title : "", date: edit ? edit.date : ui.selected, end: p && p.endDate ? p.endDate : "",
+  const allDay0 = !(p && p.s !== null);
+  const v = { title: edit ? edit.title : "", date: edit ? edit.date : ui.selected, end: p && p.endDate ? p.endDate : (edit ? edit.date : ui.selected),
     t1: p && p.s !== null ? hhmm(p.s) : "", t2: p && p.e !== null ? hhmm(p.e) : "" };
   const opt = (val, label, cur) => `<option value="${val}" ${String(cur ?? "") === String(val) ? "selected" : ""}>${label}</option>`;
+  const pid = isPair(me) ? partnerId() : null;
+  const w = edit ? whoOf(edit) : (ui.show.nous ? "nous" : ui.show[me] ? "me" : ui.show[pid] ? "partner" : "nous");
+  const cur = w === "nous" || w === "partner" || w === "me" ? w : (w === me ? "me" : w === pid ? "partner" : "nous");
+  const priv = edit ? edit.scope === "perso" : true;
   sheetForm.dataset.edit = edit ? edit.id : "";
-  sheetForm.innerHTML = `<div class="sheet">
-    <h2>${edit ? "Modifier l'événement" : "Nouvel événement"}</h2>
-    <div class="field"><label>Titre</label><input type="text" id="fTitle" value="${esc(v.title)}" placeholder="Dîner chez les parents" autocomplete="off"></div>
-    <div class="two">
-      <div class="field"><label>Date</label><input type="date" id="fDate" value="${v.date}"></div>
-      <div class="field"><label>Jusqu'au (facultatif)</label><input type="date" id="fEnd" value="${v.end}" min="${v.date}"></div>
-    </div>
-    <div class="two">
-      <div class="field"><label>De</label><input type="time" id="fTime" value="${v.t1}"></div>
-      <div class="field"><label>À (facultatif)</label><input type="time" id="fTimeEnd" value="${v.t2}"></div>
+  sheetForm.innerHTML = `<div class="sheet ${allDay0 ? "is-allday" : ""}" id="evSheet">
+    ${sheetTop(edit ? "Modifier l'événement" : "Nouvel événement", "save-event")}
+    <div class="field"><input type="text" id="fTitle" value="${esc(v.title)}" placeholder="Nom de l'événement" autocomplete="off"></div>
+    ${whoField(edit ? cur : cur, priv)}
+    <div class="tcard">
+      <label class="trow"><span>Toute la journée</span><input type="checkbox" class="tgl" id="fAll" ${allDay0 ? "checked" : ""}></label>
+      <div class="trow"><span>Commence</span><span class="dt"><input type="date" id="fDate" value="${v.date}"><input type="time" id="fTime" class="tm" value="${v.t1}"></span></div>
+      <div class="trow"><span>Se termine</span><span class="dt"><input type="date" id="fEnd" value="${v.end}" min="${v.date}"><input type="time" id="fTimeEnd" class="tm" value="${v.t2}"></span></div>
     </div>
     <div class="span-hint" id="spanHint"></div>
-    ${edit ? visEditField(edit) : scopeField(forId)}
-    <div class="two">
-      <div class="field"><label>Répéter</label><select id="fRep">${opt("", "Jamais", m.rep)}${Object.keys(REP_LABEL).map((k) => opt(k, REP_LABEL[k], m.rep)).join("")}</select></div>
-      <div class="field"><label>Rappel 🔔</label><select id="fRem">${opt("", "Aucun", m.rem)}${opt(0, "À l'heure", m.rem)}${opt(10, "10 min avant", m.rem)}${opt(60, "1 h avant", m.rem)}${opt(1440, "1 jour avant", m.rem)}</select></div>
+    <div class="tcard">
+      <div class="trow"><span>Répéter</span><select id="fRep">${opt("", "Jamais", m.rep)}${Object.keys(REP_LABEL).map((k) => opt(k, REP_LABEL[k], m.rep)).join("")}</select></div>
+      <div class="trow"><span>Alerte 🔔</span><select id="fRem">${opt("", "Aucune", m.rem)}${opt(0, "À l'heure", m.rem)}${opt(10, "10 minutes avant", m.rem)}${opt(60, "1 heure avant", m.rem)}${opt(1440, "1 jour avant", m.rem)}</select></div>
     </div>
-    <label class="check"><input type="checkbox" id="fCd" ${m.cd ? "checked" : ""}><span>Afficher en compte à rebours sur l'accueil</span></label>
-    <div class="actions"><button type="button" class="btn" data-act="close">Annuler</button><button type="button" class="btn primary" data-act="save-event">${edit ? "Enregistrer" : "Ajouter"}</button></div>
+    <label class="check"><input type="checkbox" id="fCd" ${m.cd ? "checked" : ""}><span>Afficher en compte à rebours</span></label>
   </div>`;
   sheet.showModal();
+  let prevDate = v.date;
+  const allOn = () => $("#fAll").checked;
   const upd = () => {
     const date = $("#fDate").value || ui.selected;
     $("#fEnd").min = date;
-    const r = computeSpan(date, $("#fEnd").value, $("#fTime").value, $("#fTimeEnd").value), h = $("#spanHint");
+    const r = computeSpan(date, $("#fEnd").value, allOn() ? "" : $("#fTime").value, allOn() ? "" : $("#fTimeEnd").value), h = $("#spanHint");
     const er = $("#sheetErr"); if (er) er.remove();
     if (r.err || !r.endDate) h.textContent = "";
-    else { const n = daysBetween(date, r.endDate); h.textContent = n === 1 && !$("#fEnd").value ? `La fin compte pour le lendemain (${dm(r.endDate)}).` : `Sur ${n + 1} jours : du ${dm(date)} au ${dm(r.endDate)}.`; }
+    else { const n = daysBetween(date, r.endDate); h.textContent = n === 1 && ($("#fEnd").value === date || !$("#fEnd").value) ? `La fin compte pour le lendemain (${dm(r.endDate)}).` : `Sur ${n + 1} jours : du ${dm(date)} au ${dm(r.endDate)}.`; }
   };
-  ["fDate", "fEnd", "fTime", "fTimeEnd"].forEach((i) => $("#" + i).addEventListener("input", upd));
+  $("#fDate").addEventListener("input", () => { // la fin suit le début tant qu'on ne l'a pas déplacée
+    const d = $("#fDate").value; if (d && (!$("#fEnd").value || $("#fEnd").value === prevDate || $("#fEnd").value < d)) $("#fEnd").value = d;
+    prevDate = d || prevDate; upd();
+  });
+  ["fEnd", "fTime", "fTimeEnd"].forEach((i) => $("#" + i).addEventListener("input", upd));
+  $("#fAll").addEventListener("change", () => {
+    $("#evSheet").classList.toggle("is-allday", allOn());
+    if (!allOn() && !$("#fTime").value) { const h = (new Date().getHours() + 1) % 24; $("#fTime").value = hhmm(h * 60); $("#fTimeEnd").value = hhmm(((h + 1) % 24) * 60); } // proposition ; vide = toute la journée
+    upd();
+  });
   $("#fRem").addEventListener("change", () => { if ($("#fRem").value !== "" && cloud && !(Notification?.permission === "granted" && localStorage.getItem(PUSH_KEY) === "1")) toast("Active les rappels dans Réglages pour être notifié"); });
   upd();
   if (!edit) setTimeout(() => $("#fTitle").focus(), 50);
 }
 
-function openTaskSheet() {
+function openTaskSheet(edit) {
   const labels = { day: "Jour", week: "Semaine", month: "Mois", year: "Année" };
+  const per = edit ? edit.period : ui.period, d = edit ? toISO(startOfTask(edit)) : ui.selected;
+  sheetForm.dataset.edit = edit ? edit.id : "";
+  const vis = !isPair(me) ? "" : edit ? ((edit.scope === "commun" || edit.owner === me) ? visSwitch("fVis", "commun", "perso", edit.scope === "commun") : "") : visField();
   sheetForm.innerHTML = `<div class="sheet">
-    <h2>Nouvelle tâche</h2>
-    <div class="field"><label>Titre</label><input type="text" id="fTitle" placeholder="Réviser le code de la route" autocomplete="off"></div>
+    ${sheetTop(edit ? "Modifier la tâche" : "Nouvelle tâche", "save-task")}
+    <div class="field"><label>Titre</label><input type="text" id="fTitle" value="${edit ? esc(edit.title) : ""}" placeholder="Réviser le code de la route" autocomplete="off"></div>
     <div class="two">
-      <div class="field"><label>Période</label><select id="fPeriod">${Object.keys(labels).map((p) => `<option value="${p}" ${p === ui.period ? "selected" : ""}>${labels[p]}</option>`).join("")}</select></div>
+      <div class="field"><label>Période</label><select id="fPeriod">${Object.keys(labels).map((q) => `<option value="${q}" ${q === per ? "selected" : ""}>${labels[q]}</option>`).join("")}</select></div>
+      <div class="field"><label>Date (dans la période)</label><input type="date" id="fDate" value="${d}"></div>
     </div>
-    ${visField()}
-    <div class="actions"><button type="button" class="btn" data-act="close">Annuler</button><button type="button" class="btn primary" data-act="save-task">Ajouter</button></div>
+    ${vis}
   </div>`;
   sheet.showModal();
-  setTimeout(() => $("#fTitle").focus(), 50);
+  if (!edit) setTimeout(() => $("#fTitle").focus(), 50);
+}
+
+// Séance de sport saisie à la main : comptée dans l'objectif, remplacée par la séance Hevy / montre si elle arrive ce jour-là
+function openSportSheet() {
+  sheetForm.dataset.edit = "";
+  const today = toISO(new Date());
+  sheetForm.innerHTML = `<div class="sheet">
+    ${sheetTop("Séance de sport", "save-sport")}
+    <div class="field"><label>Activité</label><select id="fKind">${kindsOf(me).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join("")}</select></div>
+    <div class="field"><label>Jour</label><input type="date" id="fDate" value="${ui.selected > today ? today : ui.selected}" max="${today}"></div>
+    <small class="muted">Si Hevy ou ta montre enregistre une séance ce jour-là, elle remplace automatiquement cette saisie.</small>
+  </div>`;
+  sheet.showModal();
 }
 
 // ---------------------------------------------------------------
@@ -1342,12 +1410,13 @@ document.addEventListener("keydown", (ev) => {
   if (/^\d$/.test(ev.key)) pinKey(ev.key); else if (ev.key === "Backspace") pinKey("del");
 });
 document.addEventListener("click", (ev) => {
+  const pm = $("#plusMenu"); if (pm && !pm.hidden && !ev.target.closest("#plusBtn")) pm.hidden = true;
   const el = ev.target.closest("[data-act], .tab");
   if (!el) return;
   if (el.classList.contains("tab")) { ui.tab = el.dataset.tab; render(true); window.scrollTo(0, 0); return; }
 
   const act = el.dataset.act;
-  if (viewing() && ["new-event", "edit-event", "del-event", "new-task", "del-task", "save-prog", "save-event", "save-task", "profile", "log-toggle", "goal-set", "goal-save", "goal-drop", "custom-add", "custom-del", "hevy-refresh", "watch-sync", "watch-remove", "strava-save", "garmin-save"].includes(act)) { toast("Lecture seule : tu consultes le profil de " + (prof(ui.viewAs)?.name || "l'autre")); return; }
+  if (viewing() && ["new-event", "edit-event", "del-event", "new-task", "edit-task", "new-sport", "save-sport", "del-task", "save-prog", "save-event", "save-task", "profile", "log-toggle", "goal-set", "goal-save", "goal-drop", "custom-add", "custom-del", "hevy-refresh", "watch-sync", "watch-remove", "strava-save", "garmin-save"].includes(act)) { toast("Lecture seule : tu consultes le profil de " + (prof(ui.viewAs)?.name || "l'autre")); return; }
   switch (act) {
     case "vis-switch": {
       const inp = document.getElementById(el.dataset.for), pub = inp.value !== el.dataset.pub;
@@ -1479,50 +1548,77 @@ document.addEventListener("click", (ev) => {
     }
     case "goto-goal": ui.tab = "tasks"; render(true); setTimeout(() => document.getElementById("sport-goal")?.scrollIntoView({ behavior: "smooth", block: "center" }), 80); break;
     case "view-as": ui.viewAs = el.dataset.id === me ? null : el.dataset.id; render(); break;
-    case "pick": ui.selected = el.dataset.date; render(); break;
+    case "pick": ui.selected = el.dataset.date; ui.month = startOfMonth(fromISO(ui.selected)); render(); break; // un jour d'un autre mois fait changer de mois
+    case "show-toggle": ui.show[el.dataset.k] = !ui.show[el.dataset.k]; render(); break;
     case "body-p": ui.bodyP = el.dataset.v === "week" ? "week" : "month"; render(); break;
     case "month": ui.month = new Date(ui.month.getFullYear(), ui.month.getMonth() + Number(el.dataset.dir), 1); render(); break;
     case "today": ui.selected = toISO(new Date()); ui.month = startOfMonth(new Date()); render(); break;
     case "shift": { const d = shift(ui.period, fromISO(ui.selected), Number(el.dataset.dir)); ui.selected = toISO(d); ui.month = startOfMonth(d); render(); break; }
     case "astro-sub": ui.astro = el.dataset.s; render(); break;
     case "period": ui.period = el.dataset.p; render(); break;
+    case "plus-menu": { const pm = $("#plusMenu"); pm.hidden = !pm.hidden; break; }
+    case "who-pick": {
+      $("#fWho").value = el.dataset.v; el.parentNode.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === el));
+      const pr = $("#privRow"); if (pr) pr.hidden = el.dataset.v !== "me"; break;
+    }
     case "new-event": openEventSheet(); break;
     case "new-task": openTaskSheet(); break;
+    case "new-sport": openSportSheet(); break;
+    case "edit-task": { const o = state.tasks.find((x) => x.id === el.dataset.id); if (o) openTaskSheet(o); break; }
+    case "save-sport": {
+      const kind = $("#fKind").value, day = $("#fDate").value;
+      if (!day) { sheetErr("Choisis un jour."); return; }
+      if (!hasLog(me, day, kind)) { (state.logs = state.logs || []).push({ owner: me, day, kind }); push("set_sport_log", { p_day: day, p_kind: kind, p_on: true }); }
+      sheet.close(); ui.tab = "sport"; ui.selected = day; ui.month = startOfMonth(fromISO(day)); render(true); lastSnap = ""; toast("Séance ajoutée"); break;
+    }
     case "close": sheet.close(); break;
     case "edit-event": { const o = state.events.find((x) => x.id === el.dataset.id); if (o) openEventSheet(null, o); break; }
     case "save-event": {
       const title = $("#fTitle").value.trim();
       if (!title) { sheetErr("Donne un titre avant d'enregistrer."); $("#fTitle").focus(); return; }
       const date = $("#fDate").value || ui.selected;
-      const t1 = $("#fTime").value, t2 = $("#fTimeEnd").value;
+      const allDay = $("#fAll").checked; // heure facultative : sans heure de début = toute la journée
+      const t1 = allDay ? "" : $("#fTime").value, t2 = allDay || !t1 ? "" : $("#fTimeEnd").value;
       const span = computeSpan(date, $("#fEnd").value, t1, t2);
       if (span.err) { sheetErr(span.err); return; }
       const time = (t1 ? (t2 ? `${t1}-${t2}` : t1) : "") + (span.endDate ? `>${span.endDate}` : "");
-      const mo = {}; if ($("#fRep").value) mo.rep = $("#fRep").value; if ($("#fRem").value !== "") mo.rem = Number($("#fRem").value); if ($("#fCd").checked) mo.cd = 1;
+      const { w, ...f } = readWho();
+      const mo = {}; if (w) mo.w = w; if ($("#fRep").value) mo.rep = $("#fRep").value; if ($("#fRem").value !== "") mo.rem = Number($("#fRem").value); if ($("#fCd").checked) mo.cd = 1;
       const meta = Object.keys(mo).length ? JSON.stringify(mo) : "";
       const editId = sheetForm.dataset.edit;
       if (editId) {
         const o = state.events.find((x) => x.id === editId);
         if (o) {
           Object.assign(o, { title, date, time, meta });
-          if ($("#fScope")) { const f = readFor(); if (!(f.scope === "commun" && o.scope === "commun")) Object.assign(o, f); }
+          if ($("#fWho")) { if (!(f.scope === "commun" && o.scope === "commun")) Object.assign(o, f); }
           push("upsert_event", evArgs(o));
         }
         save(); sheet.close(); ui.selected = date; ui.month = startOfMonth(fromISO(date)); render(); toast("Événement modifié"); break;
       }
-      const f = readFor();
       const ev = { id: uid(), title, date, time, meta, ...f };
       state.events.push(ev); push("upsert_event", evArgs(ev));
-      save(); sheet.close(); ui.selected = date; ui.month = startOfMonth(fromISO(date)); render(); notifyFor(f); adventBurst(date); break;
+      if (chipsOn()) ui.show[w || (f.scope === "commun" ? "nous" : me)] = true; // l'événement créé doit être visible
+      save(); sheet.close(); ui.selected = date; ui.month = startOfMonth(fromISO(date)); render(); adventBurst(date); break;
     }
     case "save-task": {
       const title = $("#fTitle").value.trim();
       if (!title) { sheetErr("Donne un titre avant d'enregistrer."); $("#fTitle").focus(); return; }
-      const period = $("#fPeriod").value;
+      const period = $("#fPeriod").value, date = $("#fDate").value || ui.selected, key = periodKey(period, fromISO(date));
       const f = $("#fVis") && $("#fVis").value === "commun" ? { owner: me, scope: "commun" } : { owner: me, scope: "perso" };
-      const tk = { id: uid(), title, period, key: periodKey(period, fromISO(ui.selected)), ...f, progress: 0, progress_b: 0 };
+      const editId = sheetForm.dataset.edit;
+      if (editId) {
+        const o = state.tasks.find((x) => x.id === editId);
+        if (o) {
+          Object.assign(o, { title, period, key });
+          if ($("#fVis") && !(f.scope === "commun" && o.scope === "commun")) Object.assign(o, f);
+          push("upsert_task", tkArgs(o));
+        }
+        save(); sheet.close(); ui.period = period; ui.selected = date; ui.month = startOfMonth(fromISO(date)); render(); toast("Tâche modifiée"); break;
+      }
+      const tk = { id: uid(), title, period, key, ...f, progress: 0, progress_b: 0 };
       state.tasks.push(tk); push("upsert_task", tkArgs(tk));
-      save(); sheet.close(); ui.period = period; render(); notifyFor(f); break;
+      if (isPair(me) && cloud) ui.filter = f.scope === "commun" ? "commun" : "perso";
+      save(); sheet.close(); ui.period = period; ui.selected = date; ui.month = startOfMonth(fromISO(date)); render(); break;
     }
     case "del-event": state.events = state.events.filter((e) => e.id !== el.dataset.id); push("delete_event", { p_id: el.dataset.id }); save(); render(); break;
     case "del-task": state.tasks = state.tasks.filter((t) => t.id !== el.dataset.id); push("delete_task", { p_id: el.dataset.id }); save(); render(); break;
@@ -1734,7 +1830,7 @@ function toast(msg) {
 function setMe(id) {
   if (!prof(id)) return;
   if (cloud) { // en ligne, on ne change pas de profil : toucher l'autre personnage = lui ajouter un événement
-    if (isPair(me) && isPair(id)) { ui.viewAs = id === me ? null : id; render(); } // toucher l'autre = voir son profil (lecture seule) ; toucher le sien = revenir au sien
+    if (isPair(me) && isPair(id)) { ui.tab = "cal"; ui.show[id] = !ui.show[id]; render(); } // toucher un personnage = afficher / masquer ses événements dans le calendrier
     return;
   }
   me = id; ui.filter = "perso";

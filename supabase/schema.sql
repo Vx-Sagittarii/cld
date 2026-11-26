@@ -1560,3 +1560,18 @@ language sql stable as $$
     else p_me = p_owner
   end;
 $$;
+
+-- 25. Tâches modifiables : période, date (key), visibilité et propriétaire sont aussi mis à jour (avant : seulement titre et %)
+create or replace function upsert_task(p_token uuid, p_id text, p_title text, p_period text, p_key text, p_progress int, p_owner text, p_scope text, p_progress_b int default 0)
+returns void language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null or not _can_write(me.id, p_owner, p_scope) then raise exception 'interdit'; end if;
+  if not _perm(me, 'tasks') then raise exception 'fonction désactivée'; end if;
+  if coalesce(p_id,'') !~ '^[A-Za-z0-9_-]{1,60}$' or p_period not in ('day','week','month','year') then raise exception 'invalide'; end if;
+  insert into tasks(id,title,period,key,progress,progress_b,owner,scope,created_by)
+  values (p_id,left(trim(coalesce(p_title,'')),200),p_period,left(coalesce(p_key,''),20),greatest(0,least(100,coalesce(p_progress,0))),greatest(0,least(100,coalesce(p_progress_b,0))),p_owner,p_scope,me.id)
+  on conflict (id) do update set title=excluded.title, period=excluded.period, key=excluded.key, scope=excluded.scope, owner=excluded.owner, updated_at=now()
+    where _can_modify(me.id, tasks.owner, tasks.scope, tasks.created_by)
+      and (excluded.scope = 'commun' or tasks.scope = 'perso' or tasks.created_by = me.id or tasks.created_by is null);
+end $$;
