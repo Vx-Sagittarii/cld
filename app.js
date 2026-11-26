@@ -794,21 +794,25 @@ function sportGoalEditor() {
   const wend = toISO(addDays(fromISO(mon), 6)), doneK = (k) => daysOf(me, k, mon, wend).size;
   const chips = (k) => Array.from({ length: 8 }, (_, v) => `<button type="button" class="nchip ${(d[k] || 0) === v ? "on" : ""}" data-act="goal-set" data-k="${k}" data-v="${v}">${v}</button>`).join("");
   if (!ui.goalOpen && !ui.goalDraft) {
-    // Objectif calculé automatiquement sur la période affichée : objectif par semaine × nombre de semaines de la période
-    const [pa, pb] = periodBounds(ui.period, fromISO(ui.selected)), wk = ui.period === "day" ? 1 : (daysBetween(toISO(pa), toISO(pb)) + 1) / 7;
-    const [qa, qb] = ui.period === "day" ? [fromISO(weekMon(ui.selected)), addDays(fromISO(weekMon(ui.selected)), 6)] : [pa, pb];
-    const per = { day: "cette semaine", week: "cette semaine", month: "ce mois", year: "cette année" }[ui.period];
-    const rows = ks.filter(([k]) => (cur[k] || 0) > 0).map(([k, label]) => {
-      const goal = Math.max(1, Math.round(cur[k] * wk)), done = daysOf(me, k, toISO(qa), toISO(qb)).size;
-      return `<div class="goal-ed"><b>${esc(label)}</b><span>${done} / ${goal} ${per}</span></div><div class="mbar slim"><i style="width:${Math.min(100, Math.round((done / goal) * 100))}%;--c:${done >= goal ? "#3DDC97" : "#A45CFF"}"></i></div>`;
-    }).join("") || `<p class="muted">Aucun objectif défini.</p>`;
-    return `<div class="card" id="sport-goal"><h3>🎯 Objectif sport · personnel</h3>
-    ${rows}
-    <small class="muted">Calculé d'après ton objectif par semaine.</small>
-    <div class="btn-line"><button class="btn small" data-act="goal-open">Modifier</button></div></div>`;
+    // Résumé sur la période affichée : objectif par semaine × (jours de la période ÷ 7). Le filtre Moi / Sophie / Nous choisit qui on voit.
+    const pair = isPair(me) ? PAIR : [me], whos = chipsOn() ? (ui.show.nous ? pair : [pair.find((x) => ui.show[x]) || me]) : [me];
+    const [pa, pb] = periodBounds(ui.period, fromISO(ui.selected)), nd = daysBetween(toISO(pa), toISO(pb)) + 1, day = ui.period === "day";
+    const per = { week: "cette semaine", month: "ce mois", year: "cette année" }[ui.period];
+    const one = (w) => {
+      const tg = targetsOf(goalFor(w, mon)), col = prof(w)?.color || "#A45CFF", own = w === me && !day;
+      const rows = kindsOf(w).filter(([k]) => (tg[k] || 0) > 0).map(([k, label]) => {
+        if (day) { const ok = daysOf(w, k, ui.selected, ui.selected).size > 0; return `<div class="goal-ed"><b>${esc(label)}</b><span style="color:${ok ? "#3DDC97" : "inherit"}">${ok ? "✓ Fait" : "Pas fait"}</span></div>`; }
+        const goal = Math.max(1, Math.round((tg[k] * nd) / 7)), done = daysOf(w, k, toISO(pa), toISO(pb)).size;
+        return `<div class="goal-ed"><b>${esc(label)}</b><span>${done} / ${goal} ${per}</span></div><div class="mbar slim"><i style="width:${Math.min(100, Math.round((done / goal) * 100))}%;--c:${done >= goal ? "#3DDC97" : col}"></i></div>`;
+      }).join("") || `<p class="muted">Aucun objectif défini.</p>`;
+      return `<div class="card"${w === me ? ' id="sport-goal"' : ""}><h3>🎯 Objectif sport${whos.length > 1 ? " · " + esc(prof(w)?.name || w) : ""}</h3>${rows}
+      ${day ? "" : `<small class="muted">Objectif par semaine × ${nd} jours ÷ 7</small>`}
+      ${own ? `<div class="btn-line"><button class="btn small" data-act="goal-open">Modifier</button></div>` : ""}</div>`;
+    };
+    return whos.map(one).join("") + (day ? `<small class="muted" style="display:block;padding:0 6px">Pour ajouter une séance : « + » puis « Séance de sport ».</small>` : "");
   }
   const dirty = !!ui.goalDraft && ks.some(([k]) => (d[k] || 0) !== (cur[k] || 0));
-  return `<div class="card" id="sport-goal"><h3>🎯 Objectif sport par semaine · personnel</h3>
+  return `<div class="card" id="sport-goal"><h3>🎯 Objectif sport par semaine</h3>
     <p class="muted">Combien de jours par semaine pour chaque activité ? La salle se compte toute seule avec Hevy, la course avec ta montre (Strava / Garmin). Tu peux aussi cocher des jours à la main dans l'onglet Sport.</p>
     ${ks.map(([k, label]) => `<div class="goal-ed"><b>${esc(label)}${k.startsWith("c_") ? ` <button type="button" class="del-mini" data-act="custom-del" data-id="${k}" aria-label="Supprimer cette activité">×</button>` : ""}</b><span>${doneK(k)} fait${doneK(k) > 1 ? "s" : ""} cette semaine · objectif ${d[k] || 0} / 7</span></div>${(cur[k] || 0) > 0 ? `<div class="mbar slim"><i style="width:${Math.min(100, Math.round((doneK(k) / cur[k]) * 100))}%;--c:${doneK(k) >= cur[k] ? "#3DDC97" : "#A45CFF"}"></i></div>` : ""}<div class="nchips">${chips(k)}</div>`).join("")}
     <div class="btn-line"><button class="btn small ${dirty ? "primary" : ""}" data-act="goal-save" ${dirty ? "" : "disabled"}>Enregistrer l'objectif</button></div>
