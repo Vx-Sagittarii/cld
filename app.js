@@ -658,6 +658,9 @@ function chipBar() {
   const pid = partnerId(), items = [[me, "Moi"], [pid, prof(pid)?.name || "Partenaire"], ["nous", "Nous"]];
   return `<div class="chips3">${items.map(([k, l]) => `<button type="button" class="c3 ${ui.show[k] ? "on" : ""}" style="--c:${whoColor(k)}" data-act="show-toggle" data-k="${k}" aria-pressed="${!!ui.show[k]}"><span class="ck">${ui.show[k] ? "✓" : ""}</span>${esc(l)}</button>`).join("")}</div>`;
 }
+// Ordre d'un jour : « Nous » d'abord, puis l'autre personne, puis moi ; à égalité, par heure
+const whoRank = (e) => { const w = whoOf(e); return w === "nous" ? 0 : w === me ? 2 : 1; };
+const byWhoTime = (iso) => (a, b) => whoRank(a) - whoRank(b) || (segFor(a, iso)?.s ?? -1) - (segFor(b, iso)?.s ?? -1);
 function viewCalendar() {
   const m = ui.month, today = toISO(new Date());
   const EV = allEvents(), dec = isDec();
@@ -669,7 +672,7 @@ function viewCalendar() {
     if (i >= 35 && d.getMonth() !== m.getMonth()) break; // pas de 6e ligne inutile
     const inMonth = d.getMonth() === m.getMonth();
     // Événements du jour (titres dans la case) : journée entière d'abord, puis par heure
-    const evd = EV.map((e) => inst(e, iso)).filter((e) => e && cpass(e)).sort((a, b) => (segFor(a, iso)?.s ?? -1) - (segFor(b, iso)?.s ?? -1));
+    const evd = EV.map((e) => inst(e, iso)).filter((e) => e && cpass(e)).sort(byWhoTime(iso));
     // Pastille de tâche : seulement pour les tâches courtes (≤ 7 jours) ou fréquentes, sinon une tâche d'un an mettrait un point partout
     const tcols = [...new Set(state.tasks.filter((t) => touches(t, fromISO(iso), fromISO(iso)) && cpass(t) && (tFreq(t) || (deadlineOf(t) - startOfTask(t)) / 864e5 <= 6)).map(colorOf))].slice(0, 3);
     const bars = evd.slice(0, 3).map((e) => `<i class="eb" style="--c:${colorOf(e)}">${esc(e.title)}</i>`).join("");
@@ -682,7 +685,7 @@ function viewCalendar() {
   }
 
   const sel = fromISO(ui.selected);
-  const evs = EV.map((e) => inst(e, ui.selected)).filter((e) => e && cpass(e)).sort((a, b) => (segFor(a, ui.selected)?.s ?? -1) - (segFor(b, ui.selected)?.s ?? -1));
+  const evs = EV.map((e) => inst(e, ui.selected)).filter((e) => e && cpass(e)).sort(byWhoTime(ui.selected));
   const tks = state.tasks.filter((t) => touches(t, fromISO(ui.selected), fromISO(ui.selected)) && cpass(t));
 
   return `
