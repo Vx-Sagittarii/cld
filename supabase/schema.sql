@@ -1594,3 +1594,45 @@ begin
 end $$;
 -- Les tâches communes existantes prennent la moyenne des deux anciens curseurs
 update tasks set progress = round((progress + progress_b) / 2.0)::int, progress_b = round((progress + progress_b) / 2.0)::int where scope = 'commun';
+
+
+-- 27. Tâches : note + rappel (stockés dans une colonne meta)
+alter table tasks add column if not exists meta text not null default '';
+create or replace function get_data(p_token uuid) returns json
+language plpgsql stable security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  return json_build_object(
+    'me', json_build_object('id', me.id, 'name', me.name, 'admin', me.is_admin, 'gcal_shared', me.gcal_shared,
+                            'hevy', exists(select 1 from hevy_keys where profile_id = me.id),
+                            'hevy_sync', (select synced_at from hevy_keys where profile_id = me.id), 'couple', _couple(me.id), 'need_pseudo', me.need_pseudo),
+    'profiles', _profiles_visible(me),
+    'events', coalesce((select json_agg(json_build_object('id',id,'title',title,'date',date,'time',time,'owner',owner,'scope',scope,'meta',meta))
+                        from events where owner = me.id or (scope = 'commun' and _samecp(me.id, owner))), '[]'::json),
+    'tasks',  coalesce((select json_agg(json_build_object('id',id,'title',title,'period',period,'key',key,'progress',progress,'progress_b',progress_b,'owner',owner,'scope',scope,'meta',meta))
+                        from tasks  where owner = me.id or (scope = 'commun' and _samecp(me.id, owner))), '[]'::json),
+    'gcal',   coalesce((select json_agg(json_build_object('id',g.id,'title',g.title,'date',g.date,'time',g.time,'owner',g.owner))
+                        from gcal_events g join profiles pr on pr.id = g.owner
+                        where _samecp(me.id, g.owner) and (g.owner = me.id or pr.gcal_shared)), '[]'::json),
+    'workouts', coalesce((select json_agg(json_build_object('id',w.id,'owner',w.profile_id,'title',w.title,'day',w.day,'start',w.start_time,'end',w.end_time,'sets',w.n_sets,'vol',w.volume,'ex',w.ex) order by w.start_time desc)
+                        from workouts w
+                        where w.day >= current_date - 400 and (w.profile_id = me.id or (_samecp(me.id, w.profile_id)))), '[]'::json)
+  );
+end $$;
+drop function if exists upsert_task(uuid,text,text,text,text,int,text,text,int);
+create or replace function upsert_task(p_token uuid, p_id text, p_title text, p_period text, p_key text, p_progress int, p_owner text, p_scope text, p_progress_b int default 0, p_meta text default '')
+returns void language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null or not _can_write(me.id, p_owner, p_scope) then raise exception 'interdit'; end if;
+  if not _perm(me, 'tasks') then raise exception 'fonction désactivée'; end if;
+  if coalesce(p_id,'') !~ '^[A-Za-z0-9_-]{1,60}$' or p_period not in ('day','week','month','year') then raise exception 'invalide'; end if;
+  insert into tasks(id,title,period,key,progress,progress_b,owner,scope,created_by,meta)
+  values (p_id,left(trim(coalesce(p_title,'')),200),p_period,left(coalesce(p_key,''),20),greatest(0,least(100,coalesce(p_progress,0))),greatest(0,least(100,coalesce(p_progress_b,0))),p_owner,p_scope,me.id,left(coalesce(p_meta,''),2000))
+  on conflict (id) do update set title=excluded.title, period=excluded.period, key=excluded.key, scope=excluded.scope, owner=excluded.owner, meta=excluded.meta, updated_at=now()
+    where _can_modify(me.id, tasks.owner, tasks.scope, tasks.created_by)
+      and (excluded.scope = 'commun' or tasks.scope = 'perso' or tasks.created_by = me.id or tasks.created_by is null);
+end $$;
+revoke all on function upsert_task(uuid,text,text,text,text,int,text,text,int,text) from public;
+grant execute on function upsert_task(uuid,text,text,text,text,int,text,text,int,text) to anon, authenticated;

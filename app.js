@@ -67,8 +67,9 @@ function push(fn, args) {
     })
     .finally(() => { inflight = Math.max(0, inflight - 1); if (!inflight) setTimeout(() => { try { pull(); } catch (e) {} }, 400); });
 }
+const tmeta = (t) => { try { return JSON.parse(t.meta || "{}") || {}; } catch (e) { return {}; } }; // note + rappel d'une tâche
 const evArgs = (e) => ({ p_id: e.id, p_title: e.title, p_date: e.date, p_time: e.time || "", p_owner: e.owner, p_scope: e.scope, p_meta: e.meta || "" });
-const tkArgs = (t) => ({ p_id: t.id, p_title: t.title, p_period: t.period, p_key: t.key, p_progress: t.progress, p_progress_b: t.progress_b || 0, p_owner: t.owner, p_scope: t.scope });
+const tkArgs = (t) => ({ p_id: t.id, p_title: t.title, p_period: t.period, p_key: t.key, p_progress: t.progress, p_progress_b: t.progress_b || 0, p_owner: t.owner, p_scope: t.scope, ...(t.meta !== undefined ? { p_meta: t.meta } : {}) });
 
 function load() {
   try {
@@ -1096,7 +1097,7 @@ function viewTasks() {
             <b>${esc(t.title)}</b>
             <span class="pct">${mine(t)}%</span>
           </div>
-          <small class="tsub"><span style="color:${c}">${esc(labelOf(t))}</span>${b > a ? ` · ${dm(toISO(a))} → ${dm(toISO(b))}` : ""}</small>
+          <small class="tsub"><span style="color:${c}">${esc(labelOf(t))}</span>${b > a ? ` · ${dm(toISO(a))} → ${dm(toISO(b))}` : ""}${tmeta(t).rd ? ` · 🔔 ${dm(tmeta(t).rd)} ${esc(tmeta(t).rt || "")}` : ""}${tmeta(t).n ? ` · 📝 ${esc(tmeta(t).n.length > 40 ? tmeta(t).n.slice(0, 40) + "…" : tmeta(t).n)}` : ""}</small>
           <input type="range" min="0" max="100" step="5" value="${mine(t)}" data-act="slide" data-id="${t.id}" style="--v:${mine(t)};--c:${c}" ${own ? "" : "disabled"} aria-label="Avancement : ${esc(t.title)}">
         </div>`; }).join("") || `<div class="empty">Aucune tâche ici. Touche « + » en bas à droite pour en ajouter une.</div>`}
     </div>
@@ -1383,6 +1384,7 @@ function openEventSheet(forId, edit) {
 
 function openTaskSheet(edit) {
   const labels = { day: "Jour", week: "Semaine", month: "Mois", year: "Année" };
+  const tm = edit ? tmeta(edit) : {};
   const d = edit ? toISO(startOfTask(edit)) : ui.selected, e2 = edit ? toISO(deadlineOf(edit)) : d;
   sheetForm.dataset.edit = edit ? edit.id : "";
   const vis = !isPair(me) ? "" : edit ? ((edit.scope === "commun" || edit.owner === me) ? visSwitch("fVis", "commun", "perso", edit.scope === "commun") : "") : visField();
@@ -1393,6 +1395,8 @@ function openTaskSheet(edit) {
       <div class="trow"><span>Du</span><span class="dt"><input type="date" id="fDate" value="${d}"></span></div>
       <div class="trow"><span>Au</span><span class="dt"><input type="date" id="fEnd" value="${e2}" min="${d}"></span></div>
     </div>
+    <div class="field"><label>Note</label><textarea id="fNote" rows="3" maxlength="600" placeholder="Détails, lien, ce qu'il faut penser à faire…">${esc(tm.n || "")}</textarea></div>
+    <div class="tcard"><div class="trow"><span>🔔 Rappel</span><span class="dt"><input type="date" id="fRd" value="${tm.rd || ""}"><input type="time" id="fRt" class="tm" value="${tm.rt || ""}"></span></div></div>
     ${vis}
     ${edit ? `<button type="button" class="del-link" data-act="del-sheet" data-kind="task" data-id="${edit.id}">Supprimer la tâche</button>` : ""}
   </div>`;
@@ -1620,26 +1624,35 @@ document.addEventListener("click", (ev) => {
       const date = $("#fDate").value || ui.selected, endIn = $("#fEnd").value || date;
       if (endIn < date) { sheetErr("La date de fin doit être après la date de début."); return; }
       const { period, key } = taskSpan(date, endIn);
+      let rd = $("#fRd").value, rt = $("#fRt").value; if (rd || rt) { rd = rd || date; rt = rt || "09:00"; }
+      const note = $("#fNote").value.trim(), mj = note || rd ? JSON.stringify({ ...(note ? { n: note } : {}), ...(rd ? { rd, rt } : {}) }) : "";
+      const syncRem = (tk, hadRem) => { // le rappel = un événement « ⏰ titre » lié à la tâche : il utilise les notifications déjà en place
+        const eid = "r" + tk.id, m = tmeta(tk); state.events = state.events.filter((e) => e.id !== eid);
+        if (m.rd) { const ev = { id: eid, title: "⏰ " + tk.title, date: m.rd, time: m.rt || "09:00", meta: JSON.stringify({ rem: 0 }), owner: tk.owner, scope: tk.scope }; state.events.push(ev); push("upsert_event", evArgs(ev));
+          if (cloud && !(typeof Notification !== "undefined" && Notification.permission === "granted" && localStorage.getItem(PUSH_KEY) === "1")) toast("Active les rappels dans Réglages pour être notifié"); }
+        else if (hadRem) push("delete_event", { p_id: eid });
+      };
       const f = $("#fVis") && $("#fVis").value === "commun" ? { owner: me, scope: "commun" } : { owner: me, scope: "perso" };
       const editId = sheetForm.dataset.edit;
       if (editId) {
         const o = state.tasks.find((x) => x.id === editId);
         if (o) {
-          Object.assign(o, { title, period, key });
+          const hadRem = !!tmeta(o).rd;
+          Object.assign(o, { title, period, key }); if (o.meta !== undefined || mj) o.meta = mj;
           if ($("#fVis") && !(f.scope === "commun" && o.scope === "commun")) Object.assign(o, f);
-          push("upsert_task", tkArgs(o));
+          push("upsert_task", tkArgs(o)); syncRem(o, hadRem);
         }
         save(); sheet.close(); ui.selected = date; ui.month = startOfMonth(fromISO(date)); render(); toast("Tâche modifiée"); break;
       }
-      const tk = { id: uid(), title, period, key, ...f, progress: 0, progress_b: 0 };
-      state.tasks.push(tk); push("upsert_task", tkArgs(tk));
+      const tk = { id: uid(), title, period, key, ...f, progress: 0, progress_b: 0, ...(mj ? { meta: mj } : {}) };
+      state.tasks.push(tk); push("upsert_task", tkArgs(tk)); if (mj) syncRem(tk, false);
       if (chipsOn()) ui.show = { [f.scope === "commun" ? "nous" : me]: true }; // on affiche la catégorie de la tâche créée
       save(); sheet.close(); ui.selected = date; ui.month = startOfMonth(fromISO(date)); render(); break;
     }
     case "del-sheet": {
       if (!el.classList.contains("armed")) { el.classList.add("armed"); el.textContent = "Confirmer la suppression"; setTimeout(() => { if (el.isConnected) { el.classList.remove("armed"); el.textContent = el.dataset.kind === "task" ? "Supprimer la tâche" : "Supprimer l'événement"; } }, 4000); break; }
       const id = el.dataset.id;
-      if (el.dataset.kind === "task") { state.tasks = state.tasks.filter((t) => t.id !== id); push("delete_task", { p_id: id }); }
+      if (el.dataset.kind === "task") { state.tasks = state.tasks.filter((t) => t.id !== id); push("delete_task", { p_id: id }); if (state.events.some((e) => e.id === "r" + id)) { state.events = state.events.filter((e) => e.id !== "r" + id); push("delete_event", { p_id: "r" + id }); } }
       else { state.events = state.events.filter((e) => e.id !== id); push("delete_event", { p_id: id }); }
       save(); sheet.close(); render(); toast("Supprimé"); break;
     }

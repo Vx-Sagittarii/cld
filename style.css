@@ -674,3 +674,4 @@ main { padding-top: calc(env(safe-area-inset-top) + 88px); }
 .tsub{display:block;margin:-4px 0 8px 20px;font-size:12px;opacity:.85}
 .task + .task{margin-top:16px;padding-top:16px;border-top:1px solid rgba(255,255,255,.07)}
 .task input[type=range]{width:100%}
+.field textarea{width:100%;box-sizing:border-box;padding:12px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:inherit;font:inherit;resize:vertical}
