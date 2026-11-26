@@ -116,9 +116,22 @@ const cpass = (it) => canSee(it) && (!chipsOn() || (ui.show.nous ? it.scope === 
 const pendingProg = new Map(); // % modifiés mais pas encore sauvegardés
 const tp = (t) => t.scope === "commun" ? Math.round((t.progress + (t.progress_b || 0)) / 2) : t.progress;
 // Ma part d'une tâche : sur une tâche commune, Nelson = progress, Sophie = progress_b
+// Tâche « fréquente » : jours de la semaine (0 = lundi … 6 = dimanche) dans meta.f ; jours faits dans meta.dn
+const tFreq = (t) => { const f = tmeta(t).f; return Array.isArray(f) && f.length ? f : null; };
+const wdIdx = (d) => (d.getDay() + 6) % 7;
+const WD = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
+function occs(t, a, b) { // dates (ISO) où la tâche fréquente tombe dans [a, b], à partir de sa date de début
+  const f = tFreq(t), st = startOfTask(t), out = [];
+  for (let d = a > st ? a : st; d <= b; d = addDays(d, 1)) if (f.includes(wdIdx(d))) out.push(toISO(d));
+  return out;
+}
+function freqPct(t) { // avancement = jours faits ÷ jours prévus dans la période affichée
+  const [a, b] = periodBounds(ui.period, fromISO(ui.selected)), o = occs(t, a, b), dn = tmeta(t).dn || [];
+  return o.length ? Math.round((o.filter((x) => dn.includes(x)).length / o.length) * 100) : 0;
+}
 const myField = () => "progress"; // tâche commune : un seul curseur partagé (progress, recopié dans progress_b)
-const mine = (t) => (t.scope === "commun" ? tp(t) : t.progress) || 0;
-const shown = (t) => persoView() ? mine(t) : tp(t); // volet Perso : seulement mon %, volet Commun : la moyenne
+const mine = (t) => (tFreq(t) ? freqPct(t) : (t.scope === "commun" ? tp(t) : t.progress)) || 0;
+const shown = (t) => tFreq(t) ? mine(t) : persoView() ? mine(t) : tp(t); // volet Perso : seulement mon %, volet Commun : la moyenne
 const labelOf = (it) => (it.google && it.owner !== me) ? `${prof(it.owner)?.name || "L'autre"} · Google` : it.scope === "commun" ? (metaOf(it).w ? (prof(metaOf(it).w)?.name || "?") : "Nous") : (isPair(me) ? "🔒 Privé" : (prof(it.owner)?.name || "?"));
 
 // État de l'interface (non sauvegardé)
@@ -163,7 +176,7 @@ function periodBounds(period, d) {
   if (period === "month") return [new Date(d.getFullYear(), d.getMonth(), 1), new Date(d.getFullYear(), d.getMonth() + 1, 0)];
   return [new Date(d.getFullYear(), 0, 1), new Date(d.getFullYear(), 11, 31)];
 }
-const touches = (t, a, b) => startOfTask(t) <= b && deadlineOf(t) >= a; // la tâche « touche » la période même si elle ne la couvre pas en entier
+const touches = (t, a, b) => tFreq(t) ? occs(t, a, b).length > 0 : startOfTask(t) <= b && deadlineOf(t) >= a; // la tâche « touche » la période même si elle ne la couvre pas en entier
 const tasksIn = () => { const [a, b] = periodBounds(ui.period, fromISO(ui.selected)); return state.tasks.filter((t) => touches(t, a, b) && cpass(t)); };
 // Une tâche du … au … : période « day » avec une clé « AAAA-MM-JJ+N » (N = jours après le début) ; sans « +N » = un seul jour
 const taskSpan = (a, b) => (b && b > a ? { period: "day", key: `${a}+${daysBetween(a, b)}` } : { period: "day", key: a });
@@ -696,7 +709,7 @@ function viewCalendar() {
       <div class="row">
         <div class="bar-owner" style="background:${colorOf(t)}"></div>
         <div class="t" data-act="edit-task" data-id="${t.id}" style="cursor:pointer"><b>${esc(t.title)}</b><small>${esc(labelOf(t))}</small></div>
-        <div class="time">${mine(t)}%</div>
+        <div class="time">${tFreq(t) ? ((tmeta(t).dn || []).includes(ui.selected) ? "✓" : "🔁") : mine(t) + "%"}</div>
       </div>`).join("")}</div>` : ""}
 
     ${SPORT_HOME ? sportCard() : ""}`;
@@ -1090,14 +1103,22 @@ function viewTasks() {
             <b>${esc(t.title)}</b>
             <span class="pct">${mine(t)}%</span>
           </div>
-          <small class="tsub"><span style="color:${c}">${esc(labelOf(t))}</span>${b > a ? ` · ${dm(toISO(a))} → ${dm(toISO(b))}` : ""}${tmeta(t).rd ? ` · 🔔 ${dm(tmeta(t).rd)} ${esc(tmeta(t).rt || "")}` : ""}${tmeta(t).n ? ` · 📝 ${esc(tmeta(t).n.length > 40 ? tmeta(t).n.slice(0, 40) + "…" : tmeta(t).n)}` : ""}</small>
-          <input type="range" min="0" max="100" step="5" value="${mine(t)}" data-act="slide" data-id="${t.id}" style="--v:${mine(t)};--c:${c}" ${own ? "" : "disabled"} aria-label="Avancement : ${esc(t.title)}">
+          <small class="tsub"><span style="color:${c}">${esc(labelOf(t))}</span>${tFreq(t) ? ` · 🔁 ${tFreq(t).slice().sort().map((i) => WD[i]).join(" ")}` : ""}${!tFreq(t) && b > a ? ` · ${dm(toISO(a))} → ${dm(toISO(b))}` : ""}${tmeta(t).rd ? ` · 🔔 ${dm(tmeta(t).rd)} ${esc(tmeta(t).rt || "")}` : ""}${tmeta(t).n ? ` · 📝 ${esc(tmeta(t).n.length > 40 ? tmeta(t).n.slice(0, 40) + "…" : tmeta(t).n)}` : ""}</small>
+          ${tFreq(t) ? freqBlock(t, own, c) : `<input type="range" min="0" max="100" step="5" value="${mine(t)}" data-act="slide" data-id="${t.id}" style="--v:${mine(t)};--c:${c}" ${own ? "" : "disabled"} aria-label="Avancement : ${esc(t.title)}">`}
         </div>`; }).join("") || `<div class="empty">Aucune tâche ici. Touche « + » en bas à droite pour en ajouter une.</div>`}
     </div>
     ${goalsCard()}
     ${sportGoalEditor()}`;
 }
 
+// Tâche fréquente : jour = une case à cocher, semaine = les jours prévus à cocher, mois / année = compteur
+function freqBlock(t, own, c) {
+  const [a, b] = periodBounds(ui.period, fromISO(ui.selected)), o = occs(t, a, b), dn = tmeta(t).dn || [], n = o.filter((x) => dn.includes(x)).length;
+  const btn = (d, label) => `<button type="button" class="fday ${dn.includes(d) ? "on" : ""}" style="--c:${c}" data-act="freq-day" data-id="${t.id}" data-d="${d}" ${own ? "" : "disabled"}>${label}</button>`;
+  if (ui.period === "day") return `<div class="fdays">${btn(o[0], dn.includes(o[0]) ? "✓ Fait aujourd'hui" : "Marquer comme fait")}</div>`;
+  if (ui.period === "week") return `<div class="fdays">${o.map((d) => btn(d, WD[wdIdx(fromISO(d))] + " " + fromISO(d).getDate())).join("")}</div>`;
+  return `<div class="mbar slim"><i style="width:${mine(t)}%;--c:${c}"></i></div><small class="muted">${n} / ${o.length} jours faits</small>`;
+}
 // ----- Objectifs : vue d'ensemble (semaine / mois / année) avec échéance et % en lecture seule -----
 function deadlineOf(t) {
   if (t.period === "day") return addDays(fromISO(t.key.slice(0, 10)), parseInt(t.key.slice(11), 10) || 0);
@@ -1384,16 +1405,25 @@ function openTaskSheet(edit) {
   sheetForm.innerHTML = `<div class="sheet">
     ${sheetTop(edit ? "Modifier la tâche" : "Nouvelle tâche", "save-task")}
     <div class="field"><label>Titre</label><input type="text" id="fTitle" value="${edit ? esc(edit.title) : ""}" placeholder="Réviser le code de la route" autocomplete="off"></div>
+    <div class="seg" id="tkMode"><button type="button" data-m="span">Période</button><button type="button" data-m="freq">Fréquent</button></div>
     <div class="tcard">
-      <div class="trow"><span>Du</span><span class="dt"><input type="date" id="fDate" value="${d}"></span></div>
-      <div class="trow"><span>Au</span><span class="dt"><input type="date" id="fEnd" value="${e2}" min="${d}"></span></div>
+      <div class="trow"><span id="lblFrom">Du</span><span class="dt"><input type="date" id="fDate" value="${d}"></span></div>
+      <div class="trow" id="rowEnd"><span>Au</span><span class="dt"><input type="date" id="fEnd" value="${e2}" min="${d}"></span></div>
     </div>
+    <div class="wdays" id="rowDays" hidden>${WD.map((n, i) => `<button type="button" data-wd="${i}" class="${(tm.f || []).includes(i) ? "on" : ""}">${n}</button>`).join("")}</div>
     <div class="field"><label>Note</label><textarea id="fNote" rows="3" maxlength="600" placeholder="Détails, lien, ce qu'il faut penser à faire…">${esc(tm.n || "")}</textarea></div>
-    <div class="tcard"><div class="trow"><span>🔔 Rappel</span><span class="dt"><input type="date" id="fRd" value="${tm.rd || ""}"><input type="time" id="fRt" class="tm" value="${tm.rt || ""}"></span></div></div>
+    <div class="tcard" id="remCard"><div class="trow"><span>🔔 Rappel</span><span class="dt"><input type="date" id="fRd" value="${tm.rd || ""}"><input type="time" id="fRt" class="tm" value="${tm.rt || ""}"></span></div></div>
     ${vis}
     ${edit ? `<button type="button" class="del-link" data-act="del-sheet" data-kind="task" data-id="${edit.id}">Supprimer la tâche</button>` : ""}
   </div>`;
   sheet.showModal();
+  const setMode = (m) => { // « Période » (du … au …) ou « Fréquent » (jours de la semaine, sans date de fin)
+    sheetForm.dataset.mode = m; $("#tkMode").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.m === m));
+    $("#rowEnd").hidden = m === "freq"; $("#rowDays").hidden = m !== "freq"; $("#remCard").hidden = m === "freq"; $("#lblFrom").textContent = m === "freq" ? "À partir du" : "Du";
+  };
+  setMode(edit && tFreq(edit) ? "freq" : "span");
+  $("#tkMode").addEventListener("click", (ev) => { const b = ev.target.closest("button[data-m]"); if (b) setMode(b.dataset.m); });
+  $("#rowDays").addEventListener("click", (ev) => { const b = ev.target.closest("button[data-wd]"); if (b) b.classList.toggle("on"); });
   $("#fDate").addEventListener("input", () => { const a = $("#fDate").value; $("#fEnd").min = a; if (a && (!$("#fEnd").value || $("#fEnd").value < a)) $("#fEnd").value = a; });
   if (!edit) setTimeout(() => $("#fTitle").focus(), 50);
 }
@@ -1427,7 +1457,7 @@ document.addEventListener("click", (ev) => {
   if (el.classList.contains("tab")) { ui.tab = el.dataset.tab; render(true); window.scrollTo(0, 0); return; }
 
   const act = el.dataset.act;
-  if (viewing() && ["new-event", "edit-event", "del-event", "new-task", "edit-task", "del-sheet", "goal-open", "new-sport", "save-sport", "del-task", "save-prog", "save-event", "save-task", "profile", "log-toggle", "goal-set", "goal-save", "goal-drop", "custom-add", "custom-del", "hevy-refresh", "watch-sync", "watch-remove", "strava-save", "garmin-save"].includes(act)) { toast("Lecture seule : tu consultes le profil de " + (prof(ui.viewAs)?.name || "l'autre")); return; }
+  if (viewing() && ["new-event", "edit-event", "del-event", "new-task", "edit-task", "del-sheet", "freq-day", "goal-open", "new-sport", "save-sport", "del-task", "save-prog", "save-event", "save-task", "profile", "log-toggle", "goal-set", "goal-save", "goal-drop", "custom-add", "custom-del", "hevy-refresh", "watch-sync", "watch-remove", "strava-save", "garmin-save"].includes(act)) { toast("Lecture seule : tu consultes le profil de " + (prof(ui.viewAs)?.name || "l'autre")); return; }
   switch (act) {
     case "vis-switch": {
       const inp = document.getElementById(el.dataset.for), pub = inp.value !== el.dataset.pub;
@@ -1614,11 +1644,14 @@ document.addEventListener("click", (ev) => {
     case "save-task": {
       const title = $("#fTitle").value.trim();
       if (!title) { sheetErr("Donne un titre avant d'enregistrer."); $("#fTitle").focus(); return; }
-      const date = $("#fDate").value || ui.selected, endIn = $("#fEnd").value || date;
+      const freqOn = sheetForm.dataset.mode === "freq", days = [...document.querySelectorAll("#rowDays button.on")].map((b) => Number(b.dataset.wd));
+      const date = $("#fDate").value || ui.selected, endIn = freqOn ? date : ($("#fEnd").value || date);
+      if (freqOn && !days.length) { sheetErr("Choisis au moins un jour de la semaine."); return; }
       if (endIn < date) { sheetErr("La date de fin doit être après la date de début."); return; }
       const { period, key } = taskSpan(date, endIn);
-      let rd = $("#fRd").value, rt = $("#fRt").value; if (rd || rt) { rd = rd || date; rt = rt || "09:00"; }
-      const note = $("#fNote").value.trim(), mj = note || rd ? JSON.stringify({ ...(note ? { n: note } : {}), ...(rd ? { rd, rt } : {}) }) : "";
+      let rd = freqOn ? "" : $("#fRd").value, rt = freqOn ? "" : $("#fRt").value; if (rd || rt) { rd = rd || date; rt = rt || "09:00"; }
+      const oldT = sheetForm.dataset.edit ? state.tasks.find((x) => x.id === sheetForm.dataset.edit) : null;
+      const note = $("#fNote").value.trim(), mj = note || rd || freqOn ? JSON.stringify({ ...(note ? { n: note } : {}), ...(rd ? { rd, rt } : {}), ...(freqOn ? { f: days, dn: oldT ? (tmeta(oldT).dn || []) : [] } : {}) }) : "";
       const syncRem = (tk, hadRem) => { // le rappel = un événement « ⏰ titre » lié à la tâche : il utilise les notifications déjà en place
         const eid = "r" + tk.id, m = tmeta(tk); state.events = state.events.filter((e) => e.id !== eid);
         if (m.rd) { const ev = { id: eid, title: "⏰ " + tk.title, date: m.rd, time: m.rt || "09:00", meta: JSON.stringify({ rem: 0 }), owner: tk.owner, scope: tk.scope }; state.events.push(ev); push("upsert_event", evArgs(ev));
@@ -1641,6 +1674,11 @@ document.addEventListener("click", (ev) => {
       state.tasks.push(tk); push("upsert_task", tkArgs(tk)); if (mj) syncRem(tk, false);
       if (chipsOn()) ui.show = { [f.scope === "commun" ? "nous" : me]: true }; // on affiche la catégorie de la tâche créée
       save(); sheet.close(); ui.selected = date; ui.month = startOfMonth(fromISO(date)); render(); break;
+    }
+    case "freq-day": {
+      const t = state.tasks.find((x) => x.id === el.dataset.id); if (!t) break;
+      const m = tmeta(t), dn = new Set(m.dn || []), d = el.dataset.d; if (dn.has(d)) dn.delete(d); else dn.add(d);
+      m.dn = [...dn].sort().slice(-400); t.meta = JSON.stringify(m); push("upsert_task", tkArgs(t)); save(); render(); break;
     }
     case "del-sheet": {
       if (!el.classList.contains("armed")) { el.classList.add("armed"); el.textContent = "Confirmer la suppression"; setTimeout(() => { if (el.isConnected) { el.classList.remove("armed"); el.textContent = el.dataset.kind === "task" ? "Supprimer la tâche" : "Supprimer l'événement"; } }, 4000); break; }

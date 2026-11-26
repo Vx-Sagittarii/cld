@@ -680,3 +680,12 @@ main { padding-top: calc(env(safe-area-inset-top) + 88px); }
 .field textarea,.chat-in input,.login-box input{font-size:16px}
 .task-top b{min-width:0;overflow-wrap:anywhere}
 .del-mini{position:relative}.del-mini::after{content:"";position:absolute;inset:-11px}
+/* v67 : tâches fréquentes */
+.wdays{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin:10px 0}
+.wdays button{padding:12px 0;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:inherit;font:inherit;font-size:13px;font-weight:600}
+.wdays button.on{background:linear-gradient(135deg,var(--accent),var(--orange));color:#fff;border-color:transparent}
+.fdays{display:flex;flex-wrap:wrap;gap:8px}
+.fday{padding:10px 14px;border-radius:12px;border:1.5px solid var(--c,var(--accent));background:transparent;color:inherit;font:inherit;font-size:14px;font-weight:600}
+.fday.on{background:var(--c,var(--accent));color:#fff}
+.fday:disabled{opacity:.5}
+#tkMode{margin:0 0 12px}

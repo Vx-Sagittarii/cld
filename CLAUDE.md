@@ -25,6 +25,7 @@ HTML/CSS/JS pur, **sans build**. Hébergée sur GitHub Pages, données dans Supa
 - « Qui » : Moi privé = `perso` ; Moi/Sophie/Nous partagés = `commun` (+ `meta.w`). Nous = `commun` sans `w`.
 - Tâche : `period` + `key`. Une tâche « du … au … » = `period "day"` et `key "AAAA-MM-JJ+N"` (N jours après le début). Anciennes clés `AAAA-Www`, `AAAA-MM`, `AAAA` toujours lues.
 - Tâche commune : un seul curseur partagé (`progress` recopié dans `progress_b`). `meta` JSON : `n` (note), `rd`/`rt` (rappel).
+- Tâche fréquente : `meta.f` = jours de la semaine (0 = lundi … 6 = dimanche), `meta.dn` = dates faites ; avancement = jours faits ÷ jours prévus dans la période affichée. Pas de rappel pour ces tâches.
 - Rappel de tâche = événement lié `r<idTâche>` titré « ⏰ … » (réutilise les notifications des événements).
 - Objectif sport : réglé par semaine ; affiché sur la période choisie = objectif × jours ÷ 7.
 
