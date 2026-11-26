@@ -192,7 +192,7 @@ const MOIS_LONG = ["janvier", "février", "mars", "avril", "mai", "juin", "juill
 const JOURS_LONG = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"];
 
 function periodLabel(period, d) {
-  if (period === "day") return `${JOURS_LONG[d.getDay()]} ${d.getDate()} ${MOIS[d.getMonth()]}`;
+  if (period === "day") { const j = JOURS_LONG[d.getDay()]; return `${j[0].toUpperCase() + j.slice(1)} ${d.getDate()} ${MOIS_LONG[d.getMonth()]}`; }
   if (period === "week") {
     const a = mondayOf(d), b = addDays(a, 6);
     return `${dm(toISO(a))} - ${dm(toISO(b))}`; // ex. 18/12 - 24/12
@@ -209,6 +209,7 @@ function parseTime(t) {
   return { s: m[1] !== undefined ? +m[1] * 60 + +m[2] : null, e: m[3] !== undefined ? +m[3] * 60 + +m[4] : null, endDate: m[5] || null };
 }
 const hhmm = (min) => `${pad(Math.floor(min / 60))}:${pad(min % 60)}`;
+const dmy = (iso) => { const d = fromISO(iso); return dm(iso) + (d.getFullYear() !== new Date().getFullYear() ? "/" + String(d.getFullYear()).slice(2) : ""); };
 const dm = (iso) => { const d = fromISO(iso); return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}`; };
 // Dernier jour d'un événement (= son jour de début s'il tient sur une journée)
 function endDateOf(e) { const p = parseTime(e.time); return p && p.endDate && p.endDate > e.date ? p.endDate : e.date; }
@@ -970,7 +971,7 @@ function viewSport() {
   const fmtMin = (n) => n >= 60 ? Math.floor(n / 60) + " h " + String(n % 60).padStart(2, "0") : n + " min";
   return `
     <div class="head">
-      <div><h1>Sport</h1><div class="sub">${MOIS_LONG[mo]} ${y} · ${esc(p?.name || "")}</div></div>
+      <div><h1>Sport</h1><div class="sub">${esc(p?.name || "")}</div></div>
       <div class="nav">
         ${canRefresh ? `<button class="icon-btn nav-btn ${hevyBusy ? "spin" : ""}" data-act="hevy-refresh" aria-label="Actualiser mes séances" title="Actualiser mes séances"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v5h-5"/></svg></button>` : ""}
       </div>
@@ -1087,11 +1088,7 @@ function viewTasks() {
     <div class="seg">${Object.keys(labels).map((p) => `<button class="${p === ui.period ? "on" : ""}" data-act="period" data-p="${p}">${labels[p]}</button>`).join("")}</div>
     ${chipBar()}
 
-    ${list.length ? `<div class="card overall">
-      <div class="ring" id="ring" style="--p:${avg}"><span id="ringTxt">${avg}%</span></div>
-      <div class="t"><b>Avancement ${ui.period === "day" ? "du jour" : ui.period === "week" ? "de la semaine" : ui.period === "month" ? "du mois" : "de l'année"}</b>
-      <small>${list.length ? `<b style="display:inline">${list.filter((t) => shown(t) >= 100).length}/${list.length}</b> tâche${list.length > 1 ? "s" : ""} terminée${list.filter((t) => shown(t) >= 100).length > 1 ? "s" : ""}` : ""}</small></div>
-    </div>` : ""}
+    ${list.length ? (() => { const nd = list.filter((t) => shown(t) >= 100).length; return `<div class="summary"><div class="sum-t"><b id="ringTxt">${avg}%</b> ${ui.period === "day" ? "du jour" : ui.period === "week" ? "de la semaine" : ui.period === "month" ? "du mois" : "de l'année"} · ${nd}/${list.length} terminée${nd > 1 ? "s" : ""}</div><div class="mbar slim" id="ring" style="--p:${avg}"><i></i></div></div>`; })() : ""}
 
     <div class="card">
       ${list.map((t) => {
@@ -1103,11 +1100,11 @@ function viewTasks() {
             <b>${esc(t.title)}</b>
             <span class="pct">${mine(t)}%</span>
           </div>
-          <small class="tsub"><span style="color:${c}">${esc(labelOf(t))}</span>${tFreq(t) ? ` · 🔁 ${tFreq(t).slice().sort().map((i) => WD[i]).join(" ")}` : ""}${!tFreq(t) && b > a ? ` · ${dm(toISO(a))} → ${dm(toISO(b))}` : ""}${tmeta(t).rd ? ` · 🔔 ${dm(tmeta(t).rd)} ${esc(tmeta(t).rt || "")}` : ""}${tmeta(t).n ? ` · 📝 ${esc(tmeta(t).n.length > 40 ? tmeta(t).n.slice(0, 40) + "…" : tmeta(t).n)}` : ""}</small>
+          <small class="tsub"><span style="color:${c}">${esc(labelOf(t))}</span>${tFreq(t) ? ` · 🔁 ${tFreq(t).slice().sort().map((i) => WD[i]).join(" ")}` : ""}${!tFreq(t) && b > a ? ` · ${dmy(toISO(a))} → ${dmy(toISO(b))}` : ""}${tmeta(t).rd ? ` · 🔔 ${dm(tmeta(t).rd)} ${esc(tmeta(t).rt || "")}` : ""}${tmeta(t).n ? ` · 📝 ${esc(tmeta(t).n.length > 40 ? tmeta(t).n.slice(0, 40) + "…" : tmeta(t).n)}` : ""}</small>
           ${tFreq(t) ? freqBlock(t, own, c) : `<input type="range" min="0" max="100" step="5" value="${mine(t)}" data-act="slide" data-id="${t.id}" style="--v:${mine(t)};--c:${c}" ${own ? "" : "disabled"} aria-label="Avancement : ${esc(t.title)}">`}
         </div>`; }).join("") || `<div class="empty">Aucune tâche ici. Touche « + » en bas à droite pour en ajouter une.</div>`}
     </div>
-    ${goalsCard()}
+    ${goalsCard(new Set(list.map((t) => t.id)))}
     ${sportGoalEditor()}`;
 }
 
@@ -1132,10 +1129,10 @@ function startOfTask(t) {
   if (t.period === "month") { const [y, m] = t.key.split("-").map(Number); return new Date(y, m - 1, 1); }
   return new Date(Number(t.key), 0, 1);
 }
-function goalsCard() {
+function goalsCard(skip) { // skip : tâches déjà visibles dans la liste ci-dessus
   const today = fromISO(toISO(new Date())), PL = { day: "Période", week: "Semaine", month: "Mois", year: "Année" };
   const goals = state.tasks.filter((t) => deadlineOf(t) > startOfTask(t) && cpass(t)).map((t) => ({ t, d: deadlineOf(t) }))
-    .filter((g) => g.d >= today).sort((a, b) => a.d - b.d || a.t.title.localeCompare(b.t.title)).slice(0, 12);
+    .filter((g) => g.d >= today && !(skip && skip.has(g.t.id))).sort((a, b) => a.d - b.d || a.t.title.localeCompare(b.t.title)).slice(0, 12);
   if (!goals.length) return "";
   return `<div class="card goals"><h3>Objectifs à venir</h3>
     ${goals.map(({ t, d }) => {
@@ -1144,7 +1141,7 @@ function goalsCard() {
       return `<div class="goalw"><button class="goal ${p >= 100 ? "done" : left <= 3 ? "soon" : ""}" data-act="goto-task" data-id="${t.id}">
         <i class="chip" style="background:${colorOf(t)}"></i>
         <div class="g-t"><b>${esc(t.title)}</b>
-          <small>${PL[t.period]}${persoView() ? " · " + labelOf(t) : ""} · échéance ${d.getDate()} ${MOIS[d.getMonth()]} (${when})</small>
+          <small>${t.period === "day" ? `${dmy(toISO(startOfTask(t)))} → ${dmy(toISO(d))}` : PL[t.period]} · ${when}</small>
           <div class="g-bar"><span style="width:${p}%;background:${colorOf(t)}"></span></div></div>
         <span class="g-pct">${p >= 100 ? "✓" : p + "%"}</span></button></div>`;
     }).join("")}
@@ -1365,8 +1362,8 @@ function openEventSheet(forId, edit) {
     <div class="field"><input type="text" id="fTitle" value="${esc(v.title)}" placeholder="Nom de l'événement" autocomplete="off"></div>
     ${whoField(edit ? cur : cur, priv)}
     <div class="tcard">
-      <div class="trow"><span>Commence</span><span class="dt"><input type="date" id="fDate" value="${v.date}"><input type="time" id="fTime" class="tm" value="${v.t1}"></span></div>
-      <div class="trow"><span>Se termine</span><span class="dt"><input type="date" id="fEnd" value="${v.end}" min="${v.date}"><input type="time" id="fTimeEnd" class="tm" value="${v.t2}"></span></div>
+      <div class="trow"><span>Début</span><span class="dt"><input type="date" id="fDate" value="${v.date}"><input type="time" id="fTime" class="tm" value="${v.t1}"></span></div>
+      <div class="trow"><span>Fin</span><span class="dt"><input type="date" id="fEnd" value="${v.end}" min="${v.date}"><input type="time" id="fTimeEnd" class="tm" value="${v.t2}"></span></div>
     </div>
     <div class="span-hint" id="spanHint">Sans heure : toute la journée.</div>
     <div class="tcard">
