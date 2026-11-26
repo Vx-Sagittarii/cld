@@ -556,7 +556,19 @@ function resetScene(){
    Chaque entrée = une étape lue par le moteur (t = type d'étape)
    ===================================================================== */
 // Correctif de texte appliqué à la lecture (la copie en base peut rester ancienne) : « QUE » en majuscules
-const CH1=JSON.parse(JSON.stringify(SHEET.steps).replace(/fumes que des cigarettes/g,"fumes QUE des cigarettes"));
+const STEPS0=JSON.parse(JSON.stringify(SHEET.steps).replace(/fumes que des cigarettes/g,"fumes QUE des cigarettes"));
+// Textes longs coupés en deux bulles (un toucher entre les deux). S'applique à la lecture, sans effet si le chapitre est déjà coupé.
+// cut = début de la 2e bulle. map = ancien numéro d'étape → nouveau (pour les timecodes).
+const SPLITS=[["caption","Lui alterne"],["say","Bon, STOP"],["say","Quand elle sera là"]];
+const MAP=[],CH1=[];
+STEPS0.forEach((st,i)=>{
+  MAP[i]=CH1.length;
+  const sp=SPLITS.find(x=>st.t===x[0]&&typeof st.text==="string"&&st.text.indexOf(x[1])>0);
+  if(!sp){CH1.push(st);return}
+  const k=st.text.indexOf(sp[1]),a=Object.assign({},st,{text:st.text.slice(0,k).trim()}),b=Object.assign({},st,{text:st.text.slice(k).trim()});
+  delete a.after;delete a.then;delete a.clearSweat;delete a.bigEmoji;CH1.push(a,b);
+});
+START_AT=MAP[START_AT]!=null?MAP[START_AT]:START_AT;FAST=START_AT>0;
 
 let sweatEl=null;                              // goutte de gêne de Nelson
 async function runSheet(sheet){
