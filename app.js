@@ -162,6 +162,17 @@ function periodKey(period, d) {
   if (period === "month") return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
   return String(d.getFullYear());
 }
+// Bornes [début, fin] de la période affichée, et chevauchement d'une tâche avec cette période
+function periodBounds(period, d) {
+  if (period === "day") return [fromISO(toISO(d)), fromISO(toISO(d))];
+  if (period === "week") { const a = mondayOf(d); return [a, addDays(a, 6)]; }
+  if (period === "month") return [new Date(d.getFullYear(), d.getMonth(), 1), new Date(d.getFullYear(), d.getMonth() + 1, 0)];
+  return [new Date(d.getFullYear(), 0, 1), new Date(d.getFullYear(), 11, 31)];
+}
+const touches = (t, a, b) => startOfTask(t) <= b && deadlineOf(t) >= a; // la tâche « touche » la période même si elle ne la couvre pas en entier
+const tasksIn = () => { const [a, b] = periodBounds(ui.period, fromISO(ui.selected)); return state.tasks.filter((t) => touches(t, a, b) && cpass(t)); };
+// Une tâche du … au … : période « day » avec une clé « AAAA-MM-JJ+N » (N = jours après le début) ; sans « +N » = un seul jour
+const taskSpan = (a, b) => (b && b > a ? { period: "day", key: `${a}+${daysBetween(a, b)}` } : { period: "day", key: a });
 // Décale la date de référence d'une période (suivant / précédent)
 function shift(period, d, dir) {
   if (period === "day") return addDays(d, dir);
@@ -651,7 +662,7 @@ function viewCalendar() {
     const inMonth = d.getMonth() === m.getMonth();
     // Événements du jour (titres dans la case) : journée entière d'abord, puis par heure
     const evd = EV.map((e) => inst(e, iso)).filter((e) => e && cpass(e)).sort((a, b) => (segFor(a, iso)?.s ?? -1) - (segFor(b, iso)?.s ?? -1));
-    const tcols = [...new Set(state.tasks.filter((t) => t.period === "day" && t.key === iso && cpass(t)).map(colorOf))].slice(0, 3);
+    const tcols = [...new Set(state.tasks.filter((t) => touches(t, fromISO(iso), fromISO(iso)) && cpass(t)).map(colorOf))].slice(0, 3);
     const bars = evd.slice(0, 3).map((e) => `<i class="eb" style="--c:${colorOf(e)}">${esc(e.title)}</i>`).join("");
     const more = evd.length > 3 ? `<small class="more">Encore ${evd.length - 3}</small>` : "";
     const door = dec && inMonth && d.getDate() <= 25;
@@ -663,7 +674,7 @@ function viewCalendar() {
 
   const sel = fromISO(ui.selected);
   const evs = EV.map((e) => inst(e, ui.selected)).filter((e) => e && cpass(e)).sort((a, b) => (segFor(a, ui.selected)?.s ?? -1) - (segFor(b, ui.selected)?.s ?? -1));
-  const tks = state.tasks.filter((t) => t.period === "day" && t.key === ui.selected && cpass(t));
+  const tks = state.tasks.filter((t) => touches(t, fromISO(ui.selected), fromISO(ui.selected)) && cpass(t));
 
   return `
     ${profileBar()}${chipBar()}
@@ -782,9 +793,20 @@ function sportGoalEditor() {
   const cur = targetsOf(goalFor(who, mon)), d = ui.goalDraft || cur, ks = kindsOf(me);
   const wend = toISO(addDays(fromISO(mon), 6)), doneK = (k) => daysOf(me, k, mon, wend).size;
   const chips = (k) => Array.from({ length: 8 }, (_, v) => `<button type="button" class="nchip ${(d[k] || 0) === v ? "on" : ""}" data-act="goal-set" data-k="${k}" data-v="${v}">${v}</button>`).join("");
-  if (!ui.goalOpen && !ui.goalDraft) return `<div class="card" id="sport-goal"><h3>🎯 Objectif sport · personnel</h3>
-    ${ks.filter(([k]) => (cur[k] || 0) > 0).map(([k, label]) => `<div class="goal-ed"><b>${esc(label)}</b><span>${doneK(k)} / ${cur[k]} cette semaine</span></div>`).join("") || `<p class="muted">Aucun objectif défini.</p>`}
+  if (!ui.goalOpen && !ui.goalDraft) {
+    // Objectif calculé automatiquement sur la période affichée : objectif par semaine × nombre de semaines de la période
+    const [pa, pb] = periodBounds(ui.period, fromISO(ui.selected)), wk = ui.period === "day" ? 1 : (daysBetween(toISO(pa), toISO(pb)) + 1) / 7;
+    const [qa, qb] = ui.period === "day" ? [fromISO(weekMon(ui.selected)), addDays(fromISO(weekMon(ui.selected)), 6)] : [pa, pb];
+    const per = { day: "cette semaine", week: "cette semaine", month: "ce mois", year: "cette année" }[ui.period];
+    const rows = ks.filter(([k]) => (cur[k] || 0) > 0).map(([k, label]) => {
+      const goal = Math.max(1, Math.round(cur[k] * wk)), done = daysOf(me, k, toISO(qa), toISO(qb)).size;
+      return `<div class="goal-ed"><b>${esc(label)}</b><span>${done} / ${goal} ${per}</span></div><div class="mbar slim"><i style="width:${Math.min(100, Math.round((done / goal) * 100))}%;--c:${done >= goal ? "#3DDC97" : "#A45CFF"}"></i></div>`;
+    }).join("") || `<p class="muted">Aucun objectif défini.</p>`;
+    return `<div class="card" id="sport-goal"><h3>🎯 Objectif sport · personnel</h3>
+    ${rows}
+    <small class="muted">Calculé d'après ton objectif par semaine.</small>
     <div class="btn-line"><button class="btn small" data-act="goal-open">Modifier</button></div></div>`;
+  }
   const dirty = !!ui.goalDraft && ks.some(([k]) => (d[k] || 0) !== (cur[k] || 0));
   return `<div class="card" id="sport-goal"><h3>🎯 Objectif sport par semaine · personnel</h3>
     <p class="muted">Combien de jours par semaine pour chaque activité ? La salle se compte toute seule avec Hevy, la course avec ta montre (Strava / Garmin). Tu peux aussi cocher des jours à la main dans l'onglet Sport.</p>
@@ -1045,16 +1067,14 @@ function linksCard() {
 
 // ----- Tâches -----
 function viewTasks() {
-  const ref = fromISO(ui.selected);
-  const key = periodKey(ui.period, ref);
-  const list = state.tasks.filter((t) => t.period === ui.period && t.key === key && cpass(t));
+  const list = tasksIn();
   const avg = list.length ? Math.round(list.reduce((s, t) => s + shown(t), 0) / list.length) : 0;
   const labels = { day: "Jour", week: "Semaine", month: "Mois", year: "Année" };
 
   return `
-    ${profileBar()}${chipBar()}
-    ${goalsCard()}
+    ${profileBar()}
     <div class="seg">${Object.keys(labels).map((p) => `<button class="${p === ui.period ? "on" : ""}" data-act="period" data-p="${p}">${labels[p]}</button>`).join("")}</div>
+    ${chipBar()}
 
     ${list.length ? `<div class="card overall">
       <div class="ring" id="ring" style="--p:${avg}"><span id="ringTxt">${avg}%</span></div>
@@ -1073,6 +1093,7 @@ function viewTasks() {
             <i class="chip" style="background:${colorOf(t)}"></i>
             <b>${esc(t.title)}</b>
             ${persoView() ? `<small class="vis">${labelOf(t)}</small>` : ""}
+            ${deadlineOf(t) > startOfTask(t) ? `<small class="vis">${dm(toISO(startOfTask(t)))} → ${dm(toISO(deadlineOf(t)))}</small>` : ""}
             ${two ? "" : `<span class="pct" data-w="${w1}">${mine(t)}%</span>`}
           </div>
           ${two ? [[PAIR[0], "a", t.progress], [PAIR[1], "b", t.progress_b || 0]].map(([id, w, v]) => `
@@ -1081,25 +1102,26 @@ function viewTasks() {
           <button class="btn small save-prog" data-act="save-prog" data-id="${t.id}" ${pendingProg.has(t.id) ? "" : "hidden"}>Sauvegarder</button>
         </div>`; }).join("") || `<div class="empty">Aucune tâche ici. Touche « + » en bas à droite pour en ajouter une.</div>`}
     </div>
+    ${goalsCard()}
     ${sportGoalEditor()}`;
 }
 
 // ----- Objectifs : vue d'ensemble (semaine / mois / année) avec échéance et % en lecture seule -----
 function deadlineOf(t) {
-  if (t.period === "day") return fromISO(t.key);
+  if (t.period === "day") return addDays(fromISO(t.key.slice(0, 10)), parseInt(t.key.slice(11), 10) || 0);
   if (t.period === "week") { const [y, w] = t.key.split("-W").map(Number); return addDays(addDays(mondayOf(new Date(y, 0, 4)), (w - 1) * 7), 6); }
   if (t.period === "month") { const [y, m] = t.key.split("-").map(Number); return new Date(y, m, 0); }
   return new Date(Number(t.key), 11, 31);
 }
 function startOfTask(t) {
-  if (t.period === "day") return fromISO(t.key);
+  if (t.period === "day") return fromISO(t.key.slice(0, 10));
   if (t.period === "week") { const [y, w] = t.key.split("-W").map(Number); return addDays(mondayOf(new Date(y, 0, 4)), (w - 1) * 7); }
   if (t.period === "month") { const [y, m] = t.key.split("-").map(Number); return new Date(y, m - 1, 1); }
   return new Date(Number(t.key), 0, 1);
 }
 function goalsCard() {
-  const today = fromISO(toISO(new Date())), PL = { week: "Semaine", month: "Mois", year: "Année" };
-  const goals = state.tasks.filter((t) => t.period !== "day" && cpass(t)).map((t) => ({ t, d: deadlineOf(t) }))
+  const today = fromISO(toISO(new Date())), PL = { day: "Période", week: "Semaine", month: "Mois", year: "Année" };
+  const goals = state.tasks.filter((t) => deadlineOf(t) > startOfTask(t) && cpass(t)).map((t) => ({ t, d: deadlineOf(t) }))
     .filter((g) => g.d >= today).sort((a, b) => a.d - b.d || a.t.title.localeCompare(b.t.title)).slice(0, 12);
   if (!goals.length) return "";
   return `<div class="card goals"><h3>Objectifs à venir</h3>
@@ -1363,20 +1385,21 @@ function openEventSheet(forId, edit) {
 
 function openTaskSheet(edit) {
   const labels = { day: "Jour", week: "Semaine", month: "Mois", year: "Année" };
-  const per = edit ? edit.period : ui.period, d = edit ? toISO(startOfTask(edit)) : ui.selected;
+  const d = edit ? toISO(startOfTask(edit)) : ui.selected, e2 = edit ? toISO(deadlineOf(edit)) : d;
   sheetForm.dataset.edit = edit ? edit.id : "";
   const vis = !isPair(me) ? "" : edit ? ((edit.scope === "commun" || edit.owner === me) ? visSwitch("fVis", "commun", "perso", edit.scope === "commun") : "") : visField();
   sheetForm.innerHTML = `<div class="sheet">
     ${sheetTop(edit ? "Modifier la tâche" : "Nouvelle tâche", "save-task")}
     <div class="field"><label>Titre</label><input type="text" id="fTitle" value="${edit ? esc(edit.title) : ""}" placeholder="Réviser le code de la route" autocomplete="off"></div>
-    <div class="two">
-      <div class="field"><label>Période</label><select id="fPeriod">${Object.keys(labels).map((q) => `<option value="${q}" ${q === per ? "selected" : ""}>${labels[q]}</option>`).join("")}</select></div>
-      <div class="field"><label>Date (dans la période)</label><input type="date" id="fDate" value="${d}"></div>
+    <div class="tcard">
+      <div class="trow"><span>Du</span><span class="dt"><input type="date" id="fDate" value="${d}"></span></div>
+      <div class="trow"><span>Au</span><span class="dt"><input type="date" id="fEnd" value="${e2}" min="${d}"></span></div>
     </div>
     ${vis}
     ${edit ? `<button type="button" class="del-link" data-act="del-sheet" data-kind="task" data-id="${edit.id}">Supprimer la tâche</button>` : ""}
   </div>`;
   sheet.showModal();
+  $("#fDate").addEventListener("input", () => { const a = $("#fDate").value; $("#fEnd").min = a; if (a && (!$("#fEnd").value || $("#fEnd").value < a)) $("#fEnd").value = a; });
   if (!edit) setTimeout(() => $("#fTitle").focus(), 50);
 }
 
@@ -1596,7 +1619,9 @@ document.addEventListener("click", (ev) => {
     case "save-task": {
       const title = $("#fTitle").value.trim();
       if (!title) { sheetErr("Donne un titre avant d'enregistrer."); $("#fTitle").focus(); return; }
-      const period = $("#fPeriod").value, date = $("#fDate").value || ui.selected, key = periodKey(period, fromISO(date));
+      const date = $("#fDate").value || ui.selected, endIn = $("#fEnd").value || date;
+      if (endIn < date) { sheetErr("La date de fin doit être après la date de début."); return; }
+      const { period, key } = taskSpan(date, endIn);
       const f = $("#fVis") && $("#fVis").value === "commun" ? { owner: me, scope: "commun" } : { owner: me, scope: "perso" };
       const editId = sheetForm.dataset.edit;
       if (editId) {
@@ -1606,12 +1631,12 @@ document.addEventListener("click", (ev) => {
           if ($("#fVis") && !(f.scope === "commun" && o.scope === "commun")) Object.assign(o, f);
           push("upsert_task", tkArgs(o));
         }
-        save(); sheet.close(); ui.period = period; ui.selected = date; ui.month = startOfMonth(fromISO(date)); render(); toast("Tâche modifiée"); break;
+        save(); sheet.close(); ui.selected = date; ui.month = startOfMonth(fromISO(date)); render(); toast("Tâche modifiée"); break;
       }
       const tk = { id: uid(), title, period, key, ...f, progress: 0, progress_b: 0 };
       state.tasks.push(tk); push("upsert_task", tkArgs(tk));
       if (chipsOn()) ui.show = { [f.scope === "commun" ? "nous" : me]: true }; // on affiche la catégorie de la tâche créée
-      save(); sheet.close(); ui.period = period; ui.selected = date; ui.month = startOfMonth(fromISO(date)); render(); break;
+      save(); sheet.close(); ui.selected = date; ui.month = startOfMonth(fromISO(date)); render(); break;
     }
     case "del-sheet": {
       if (!el.classList.contains("armed")) { el.classList.add("armed"); el.textContent = "Confirmer la suppression"; setTimeout(() => { if (el.isConnected) { el.classList.remove("armed"); el.textContent = el.dataset.kind === "task" ? "Supprimer la tâche" : "Supprimer l'événement"; } }, 4000); break; }
@@ -1800,8 +1825,7 @@ document.addEventListener("input", (ev) => {
     card.classList.toggle("done", shown(t) >= 100);
     pendingProg.set(t.id, true); card.querySelector(".save-prog").hidden = false;
     // Recalcule le cercle global
-    const key = periodKey(ui.period, fromISO(ui.selected));
-    const list = state.tasks.filter((x) => x.period === ui.period && x.key === key && cpass(x));
+    const list = tasksIn();
     const avg = Math.round(list.reduce((s, x) => s + shown(x), 0) / list.length);
     $("#ring").style.setProperty("--p", avg);
     $("#ringTxt").textContent = avg + "%";
