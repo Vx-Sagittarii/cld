@@ -420,13 +420,19 @@ function viewLogin() {
 // Bandeau fixe : réglages · flèches + date / période choisie · « + »
 function updateTopbar() {
   const tab = ui.tab; let t = "", sub = "", act = "";
-  if (tab === "cal") { t = `${MOIS_LONG[ui.month.getMonth()]} ${ui.month.getFullYear()}`; const sd = fromISO(ui.selected); sub = `${JOURS_LONG[sd.getDay()]} ${sd.getDate()} ${MOIS[sd.getMonth()]}`; act = "month"; }
+  if (tab === "cal") { t = `${MOIS_LONG[ui.month.getMonth()]} ${ui.month.getFullYear()}`; act = "month"; }
   else if (tab === "tasks") { t = periodLabel(ui.period, fromISO(ui.selected)); if (ui.period === "week") sub = "Semaine " + isoWeek(fromISO(ui.selected)).week; act = "shift"; }
   else if (tab === "sport") { const mon = mondayOf(fromISO(ui.selected)); t = `${MOIS_LONG[ui.month.getMonth()]} ${ui.month.getFullYear()}`; sub = `${dm(toISO(mon))} - ${dm(toISO(addDays(mon, 6)))}`; act = "month"; }
   else t = tab === "astro" ? "Astro" : tab === "story" ? "Story" : ui.admin ? "Administration" : "Réglages";
   $("#tbTitle").textContent = t; $("#tbSub").textContent = sub; $("#tbSub").hidden = !sub;
   ["tbPrev", "tbNext"].forEach((id) => { const b = $("#" + id); b.hidden = !act; b.dataset.act = act; });
 }
+// Accueil : la barre du haut n'apparaît que lorsqu'on a défilé sous le calendrier
+function homeBar() {
+  const c = document.querySelector(".calcard");
+  document.body.classList.toggle("tb-show", !(document.body.classList.contains("tb-home")) || !!(c && c.getBoundingClientRect().bottom < 40));
+}
+addEventListener("scroll", () => homeBar(), { passive: true });
 function render(animate = false) {
   chatSync();
   document.body.classList.toggle("login", needLogin || (loaded && needPseudo));
@@ -440,7 +446,8 @@ function render(animate = false) {
   document.body.classList.toggle("solo", cloud && !isNS(me));
   renderHero();
   applySeason();
-  updateTopbar();
+  document.body.classList.toggle("tb-home", ui.tab === "cal"); // accueil : barre du haut cachée tant que le calendrier est visible
+  updateTopbar(); homeBar();
   if (!loaded) { view.innerHTML = `<div class="empty">Chargement…</div>`; return; }
   if (ui.tab === "cal") view.innerHTML = (cloud && !isNS(me) ? `<div class="brandbar" aria-hidden="true">IWI2ME</div>` : "") + banners() + viewCalendar();
   else if (ui.tab === "tasks") view.innerHTML = viewTasks();
@@ -450,6 +457,7 @@ function render(animate = false) {
   else view.innerHTML = ui.admin && isAdmin ? (adminOk ? viewAdmin() : viewAdminLock()) : viewSettings();
   document.body.classList.toggle("viewing", viewing() && (ui.tab === "cal" || ui.tab === "tasks"));
   view.classList.toggle("enter", animate);
+  homeBar();
   if (gcal.on && gcal.token && ui.tab === "cal") ensureGcal();        // cascade d'apparition seulement au changement d'onglet
   hero.classList.toggle("off", ui.tab !== "cal" || (cloud && !isNS(me))); // le bandeau photo n'apparaît que sur le calendrier
   try { sessionStorage.setItem("iwi-nav", JSON.stringify({ tab: ui.tab, admin: !!ui.admin })); } catch (e) {}

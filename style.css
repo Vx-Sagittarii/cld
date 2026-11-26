@@ -776,3 +776,8 @@ button.chip-glass.zoom { min-width: 40px; min-height: 40px; display: inline-flex
 .grid.cal .day .bk { font-style: normal; font-size: 10px; line-height: 1; margin-right: 1px; }
 .story-card .add-btn { margin-top: 10px; }
 label.add-btn { display: block; text-align: center; cursor: pointer; }
+
+/* v80 : accueil — barre du haut visible seulement sous le calendrier */
+body.tb-home .topbar { transform: translateY(-110%); transition: transform .25s ease; }
+body.tb-home.tb-show .topbar { transform: none; }
+body.tb-home main { padding-top: calc(env(safe-area-inset-top) + 12px); }
