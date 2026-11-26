@@ -581,7 +581,7 @@ function filterBar() {
   return `<div class="seg two">${f.map(([k, l]) => `<button class="${k === ui.filter ? "on" : ""}" data-act="filter" data-f="${k}">${l}</button>`).join("")}</div>`;
 }
 function renderHero() {
-  document.querySelectorAll(".spot").forEach((s) => s.classList.toggle("active", chipsOn() && ui.tab === "cal" ? !!ui.show[s.dataset.id] : s.dataset.id === (viewing() ? ui.viewAs : me)));
+  document.querySelectorAll(".spot").forEach((s) => s.classList.toggle("active", chipsOn() && ui.tab === "cal" ? !!(ui.show.nous || ui.show[s.dataset.id]) : s.dataset.id === (viewing() ? ui.viewAs : me)));
 }
 
 // ----- Mini-journée : les événements du jour en un coup d'œil -----
@@ -1544,7 +1544,7 @@ document.addEventListener("click", (ev) => {
     case "goto-goal": ui.tab = "tasks"; render(true); setTimeout(() => document.getElementById("sport-goal")?.scrollIntoView({ behavior: "smooth", block: "center" }), 80); break;
     case "view-as": ui.viewAs = el.dataset.id === me ? null : el.dataset.id; render(); break;
     case "pick": ui.selected = el.dataset.date; ui.month = startOfMonth(fromISO(ui.selected)); render(); break; // un jour d'un autre mois fait changer de mois
-    case "show-toggle": ui.show[el.dataset.k] = !ui.show[el.dataset.k]; render(); break;
+    case "show-toggle": ui.show = { [el.dataset.k]: true }; render(); break; // un seul choix : Nelson, Sophie ou Nous
     case "body-p": ui.bodyP = el.dataset.v === "week" ? "week" : "month"; render(); break;
     case "month": ui.month = new Date(ui.month.getFullYear(), ui.month.getMonth() + Number(el.dataset.dir), 1); render(); break;
     case "today": ui.selected = toISO(new Date()); ui.month = startOfMonth(new Date()); render(); break;
@@ -1592,7 +1592,7 @@ document.addEventListener("click", (ev) => {
       }
       const ev = { id: uid(), title, date, time, meta, ...f };
       state.events.push(ev); push("upsert_event", evArgs(ev));
-      if (chipsOn()) ui.show[w || (f.scope === "commun" ? "nous" : me)] = true; // l'événement créé doit être visible
+      if (chipsOn()) ui.show = { [w || (f.scope === "commun" ? "nous" : me)]: true }; // on affiche la catégorie de l'événement créé
       save(); sheet.close(); ui.selected = date; ui.month = startOfMonth(fromISO(date)); render(); adventBurst(date); break;
     }
     case "save-task": {
@@ -1612,7 +1612,7 @@ document.addEventListener("click", (ev) => {
       }
       const tk = { id: uid(), title, period, key, ...f, progress: 0, progress_b: 0 };
       state.tasks.push(tk); push("upsert_task", tkArgs(tk));
-      if (chipsOn()) ui.show[f.scope === "commun" ? "nous" : me] = true; // la tâche créée doit être visible
+      if (chipsOn()) ui.show = { [f.scope === "commun" ? "nous" : me]: true }; // on affiche la catégorie de la tâche créée
       save(); sheet.close(); ui.period = period; ui.selected = date; ui.month = startOfMonth(fromISO(date)); render(); break;
     }
     case "del-event": state.events = state.events.filter((e) => e.id !== el.dataset.id); push("delete_event", { p_id: el.dataset.id }); save(); render(); break;
@@ -1825,7 +1825,7 @@ function toast(msg) {
 function setMe(id) {
   if (!prof(id)) return;
   if (cloud) { // en ligne, on ne change pas de profil : toucher l'autre personnage = lui ajouter un événement
-    if (isPair(me) && isPair(id)) { ui.tab = "cal"; ui.show[id] = !ui.show[id]; render(); } // toucher un personnage = afficher / masquer ses événements dans le calendrier
+    if (isPair(me) && isPair(id)) { ui.tab = "cal"; ui.show = { [id]: true }; render(); } // toucher un personnage = afficher / masquer ses événements dans le calendrier
     return;
   }
   me = id; ui.filter = "perso";
