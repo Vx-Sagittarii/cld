@@ -1575,3 +1575,22 @@ begin
     where _can_modify(me.id, tasks.owner, tasks.scope, tasks.created_by)
       and (excluded.scope = 'commun' or tasks.scope = 'perso' or tasks.created_by = me.id or tasks.created_by is null);
 end $$;
+
+
+-- 26. Tâche commune : un seul curseur partagé (les deux peuvent le modifier)
+create or replace function set_progress(p_token uuid, p_id text, p_value int) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token); t tasks; v int := greatest(0, least(100, coalesce(p_value, 0)));
+begin
+  select * into t from tasks where id = p_id;
+  if not found then raise exception 'introuvable'; end if;
+  if t.scope = 'commun' and _samecp(me.id, t.owner) then
+    update tasks set progress = v, progress_b = v, updated_at = now() where id = p_id;
+  elsif t.owner = me.id then
+    update tasks set progress = v, updated_at = now() where id = p_id;
+  else
+    raise exception 'interdit';
+  end if;
+end $$;
+-- Les tâches communes existantes prennent la moyenne des deux anciens curseurs
+update tasks set progress = round((progress + progress_b) / 2.0)::int, progress_b = round((progress + progress_b) / 2.0)::int where scope = 'commun';

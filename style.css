@@ -670,3 +670,7 @@ main { padding-top: calc(env(safe-area-inset-top) + 88px); }
 .del-link{display:block;width:100%;margin-top:18px;padding:12px;background:none;border:0;color:#ff6b6b;font:inherit;font-size:14px;cursor:pointer;border-radius:12px}
 .del-link.armed{background:#ff6b6b;color:#fff;font-weight:600}
 .task-top{cursor:pointer}
+/* v61 : liste de tâches simple, un seul curseur */
+.tsub{display:block;margin:-4px 0 8px 20px;font-size:12px;opacity:.85}
+.task + .task{margin-top:16px;padding-top:16px;border-top:1px solid rgba(255,255,255,.07)}
+.task input[type=range]{width:100%}

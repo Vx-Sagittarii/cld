@@ -115,8 +115,8 @@ const cpass = (it) => canSee(it) && (!chipsOn() || (ui.show.nous ? it.scope === 
 const pendingProg = new Map(); // % modifiés mais pas encore sauvegardés
 const tp = (t) => t.scope === "commun" ? Math.round((t.progress + (t.progress_b || 0)) / 2) : t.progress;
 // Ma part d'une tâche : sur une tâche commune, Nelson = progress, Sophie = progress_b
-const myField = (t) => (t.scope === "commun" && me === PAIR[1]) ? "progress_b" : "progress";
-const mine = (t) => t[myField(t)] || 0;
+const myField = () => "progress"; // tâche commune : un seul curseur partagé (progress, recopié dans progress_b)
+const mine = (t) => (t.scope === "commun" ? tp(t) : t.progress) || 0;
 const shown = (t) => persoView() ? mine(t) : tp(t); // volet Perso : seulement mon %, volet Commun : la moyenne
 const labelOf = (it) => (it.google && it.owner !== me) ? `${prof(it.owner)?.name || "L'autre"} · Google` : it.scope === "commun" ? (metaOf(it).w ? (prof(metaOf(it).w)?.name || "?") : "Nous") : (isPair(me) ? "🔒 Privé" : (prof(it.owner)?.name || "?"));
 
@@ -702,7 +702,7 @@ function viewCalendar() {
       <div class="row">
         <div class="bar-owner" style="background:${colorOf(t)}"></div>
         <div class="t" data-act="edit-task" data-id="${t.id}" style="cursor:pointer"><b>${esc(t.title)}</b><small>${esc(labelOf(t))}</small></div>
-        <div class="time">${persoView() ? mine(t) + "%" : t.scope === "commun" ? `${prof(PAIR[0])?.name[0] || "A"} ${t.progress}% · ${prof(PAIR[1])?.name[0] || "B"} ${t.progress_b || 0}%` : t.progress + "%"}</div>
+        <div class="time">${mine(t)}%</div>
       </div>`).join("")}</div>` : ""}
 
     ${SPORT_HOME ? sportCard() : ""}`;
@@ -1088,22 +1088,16 @@ function viewTasks() {
 
     <div class="card">
       ${list.map((t) => {
-        const two = t.scope === "commun" && !persoView();
-        const w1 = myField(t) === "progress_b" ? "b" : "a";
-        const sl = (val, who, c, off) => `<input type="range" min="0" max="100" step="5" value="${val}" data-act="slide" data-id="${t.id}" data-who="${who}" style="--v:${val};--c:${c}" ${off ? "disabled" : ""}>`;
+        const own = t.scope === "commun" || t.owner === me, c = colorOf(t), a = startOfTask(t), b = deadlineOf(t);
         return `
-        <div class="task ${shown(t) >= 100 ? "done" : ""}" data-id="${t.id}">
+        <div class="task ${mine(t) >= 100 ? "done" : ""}" data-id="${t.id}">
           <div class="task-top" data-act="edit-task" data-id="${t.id}">
-            <i class="chip" style="background:${colorOf(t)}"></i>
+            <i class="chip" style="background:${c}"></i>
             <b>${esc(t.title)}</b>
-            ${persoView() ? `<small class="vis">${labelOf(t)}</small>` : ""}
-            ${deadlineOf(t) > startOfTask(t) ? `<small class="vis">${dm(toISO(startOfTask(t)))} → ${dm(toISO(deadlineOf(t)))}</small>` : ""}
-            ${two ? "" : `<span class="pct" data-w="${w1}">${mine(t)}%</span>`}
+            <span class="pct">${mine(t)}%</span>
           </div>
-          ${two ? [[PAIR[0], "a", t.progress], [PAIR[1], "b", t.progress_b || 0]].map(([id, w, v]) => `
-            <div class="who"><span style="color:${prof(id)?.color}">${esc(prof(id)?.name || id)}${(me === PAIR[1]) === (w === "b") ? " (toi)" : ""}</span><span class="pct" data-w="${w}">${v}%</span></div>${sl(v, w, prof(id)?.color, (me === PAIR[1]) !== (w === "b"))}`).join("")
-            : sl(mine(t), w1, colorOf(t))}
-          <button class="btn small save-prog" data-act="save-prog" data-id="${t.id}" ${pendingProg.has(t.id) ? "" : "hidden"}>Sauvegarder</button>
+          <small class="tsub"><span style="color:${c}">${esc(labelOf(t))}</span>${b > a ? ` · ${dm(toISO(a))} → ${dm(toISO(b))}` : ""}</small>
+          <input type="range" min="0" max="100" step="5" value="${mine(t)}" data-act="slide" data-id="${t.id}" style="--v:${mine(t)};--c:${c}" ${own ? "" : "disabled"} aria-label="Avancement : ${esc(t.title)}">
         </div>`; }).join("") || `<div class="empty">Aucune tâche ici. Touche « + » en bas à droite pour en ajouter une.</div>`}
     </div>
     ${goalsCard()}
@@ -1821,13 +1815,13 @@ document.addEventListener("input", (ev) => {
   if (el.dataset.act === "slide") {
     const t = state.tasks.find((x) => x.id === el.dataset.id);
     if (!t) return;
-    const val = Number(el.value), w = el.dataset.who === "b" ? "b" : "a";
-    if (w === "b") t.progress_b = val; else t.progress = val;
+    const val = Number(el.value);
+    t.progress = val; if (t.scope === "commun") t.progress_b = val; // un seul curseur pour les deux
     el.style.setProperty("--v", val);
     const card = el.closest(".task");
-    const pc = card.querySelector(`.pct[data-w="${w}"]`); if (pc) pc.textContent = val + "%";
-    card.classList.toggle("done", shown(t) >= 100);
-    pendingProg.set(t.id, true); card.querySelector(".save-prog").hidden = false;
+    const pc = card.querySelector(".pct"); if (pc) pc.textContent = val + "%";
+    card.classList.toggle("done", val >= 100);
+    pendingProg.set(t.id, true);
     // Recalcule le cercle global
     const list = tasksIn();
     const avg = Math.round(list.reduce((s, x) => s + shown(x), 0) / list.length);
@@ -1837,6 +1831,11 @@ document.addEventListener("input", (ev) => {
   if (el.dataset.pname) { const p = prof(el.dataset.pname); if (p) p.name = el.value.trim() || p.name; }
 });
 document.addEventListener("change", (ev) => {
+  if (ev.target.dataset.act === "slide") { // sauvegarde automatique quand on lâche le curseur
+    const t = state.tasks.find((x) => x.id === ev.target.dataset.id);
+    if (t) { pendingProg.delete(t.id); save(); push("set_progress", { p_id: t.id, p_value: mine(t) }); toast("Avancement enregistré"); }
+    return;
+  }
   if (ev.target.dataset.pname) { save(); push("rename_profile", { p_id: ev.target.dataset.pname, p_name: prof(ev.target.dataset.pname).name }); }
   if (ev.target.id === "importFile") importData(ev.target.files[0]);
 });
@@ -1956,7 +1955,7 @@ async function pull() {
       const loc = new Map(state.tasks.filter((t) => pendingProg.has(t.id)).map((t) => [t.id, t]));
       state.profiles = d.profiles; state.events = d.events; state.gcalShared = d.gcal || []; state.workouts = d.workouts || []; state.goals = d.sport?.goals || []; state.logs = d.sport?.logs || []; state.watch = d.sport?.watch || []; state.acts = d.sport?.acts || []; state.custom = d.sport?.custom || []; state.perms = d.sport?.perms || {};
       // un % pas encore sauvegardé garde SA valeur locale (ma part), le reste vient de la base
-      state.tasks = d.tasks.map((t) => { const l = loc.get(t.id); return l ? Object.assign({}, t, { [myField(t)]: l[myField(t)] }) : t; });
+      state.tasks = d.tasks.map((t) => { const l = loc.get(t.id); return l ? Object.assign({}, t, { progress: l.progress }, t.scope === "commun" ? { progress_b: l.progress_b } : {}) : t; });
       fixColors(state.profiles);
       if (!first) PERM_DEFS.forEach(([k, l]) => { if (prevPerms[k] !== false && (state.perms || {})[k] === false) toast(`L'admin a désactivé « ${l.replace(/^\S+\s/, "")} » pour ton profil`); });
       try { localStorage.setItem(CACHE_KEY, snap); } catch (e) {}
