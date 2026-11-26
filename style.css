@@ -768,3 +768,11 @@ button.chip-glass.zoom { min-width: 40px; min-height: 40px; display: inline-flex
 .qks.one { flex-wrap: nowrap; gap: 5px; overflow-x: auto; }
 .qks.one button { padding: 6px 10px; font-size: 13px; white-space: nowrap; flex: 1 1 auto; }
 .qks button.on { background: #38227A; color: #fff; border-color: #8B5CF6; }
+
+
+/* Story : onglet verrouillé (Sophie, avant le jour du chapitre) + 📖 sur les jours du calendrier */
+.tab.locked { opacity: .4; filter: grayscale(1); position: relative; }
+.tab.locked::after { content: "🔒"; position: absolute; top: 2px; right: 22%; font-size: 11px; }
+.grid.cal .day .bk { font-style: normal; font-size: 10px; line-height: 1; margin-right: 1px; }
+.story-card .add-btn { margin-top: 10px; }
+label.add-btn { display: block; text-align: center; cursor: pointer; }

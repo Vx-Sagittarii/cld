@@ -95,6 +95,11 @@ if (cloud) me = null; // en ligne, le profil vient du lien
 else if (!state.profiles.some((p) => p.id === me)) me = "nelson";
 const prof = (id) => state.profiles.find((p) => p.id === id);
 const isPair = (id) => PAIR.includes(id);
+// Story (voir plus bas) : déclaré tôt car l'affichage en dépend
+const story = { list: [], sheets: {}, loading: {}, ready: false, busy: false, snap: "" };
+const storyOn = () => cloud && isPair(me);
+const storyOpen = () => storyOn() && (isAdmin || story.list.some((c) => c.unlocked));
+const storyOf = (iso) => storyOn() ? story.list.find((c) => String(c.day).slice(0, 10) === iso) : null;
 
 // Règles de visibilité : le commun n'est vu que par Nelson et Sophie ; le reste que par son propriétaire
 // Mode consultation : je regarde le profil public de l'autre (commun + son Google partagé), en lecture seule
@@ -136,7 +141,7 @@ const shown = (t) => tFreq(t) ? mine(t) : persoView() ? mine(t) : tp(t); // vole
 const labelOf = (it) => (it.google && it.owner !== me) ? `${prof(it.owner)?.name || "L'autre"} · Google` : it.scope === "commun" ? (metaOf(it).w ? (prof(metaOf(it).w)?.name || "?") : "Nous") : (isPair(me) ? "🔒 Privé" : (prof(it.owner)?.name || "?"));
 
 // État de l'interface (non sauvegardé)
-const TABS_OK = ["cal", "tasks", "sport", "astro", "settings"];
+const TABS_OK = ["cal", "tasks", "sport", "astro", "story", "settings"];
 const savedNav = (() => { try { return JSON.parse(sessionStorage.getItem("iwi-nav") || "{}"); } catch (e) { return {}; } })(); // survit à l'actualisation, pas à la fermeture
 const ui = {
   tab: TABS_OK.includes(savedNav.tab) ? savedNav.tab : "cal",
@@ -418,7 +423,7 @@ function updateTopbar() {
   if (tab === "cal") { t = `${MOIS_LONG[ui.month.getMonth()]} ${ui.month.getFullYear()}`; const sd = fromISO(ui.selected); sub = `${JOURS_LONG[sd.getDay()]} ${sd.getDate()} ${MOIS[sd.getMonth()]}`; act = "month"; }
   else if (tab === "tasks") { t = periodLabel(ui.period, fromISO(ui.selected)); if (ui.period === "week") sub = "Semaine " + isoWeek(fromISO(ui.selected)).week; act = "shift"; }
   else if (tab === "sport") { const mon = mondayOf(fromISO(ui.selected)); t = `${MOIS_LONG[ui.month.getMonth()]} ${ui.month.getFullYear()}`; sub = `${dm(toISO(mon))} - ${dm(toISO(addDays(mon, 6)))}`; act = "month"; }
-  else t = tab === "astro" ? "Astro" : ui.admin ? "Administration" : "Réglages";
+  else t = tab === "astro" ? "Astro" : tab === "story" ? "Story" : ui.admin ? "Administration" : "Réglages";
   $("#tbTitle").textContent = t; $("#tbSub").textContent = sub; $("#tbSub").hidden = !sub;
   ["tbPrev", "tbNext"].forEach((id) => { const b = $("#" + id); b.hidden = !act; b.dataset.act = act; });
 }
@@ -428,9 +433,10 @@ function render(animate = false) {
   if (needLogin) { view.innerHTML = viewLogin(); hero.classList.add("off"); return; }
   if (loaded && needPseudo) { if (!$("#psName")) view.innerHTML = viewPseudo(); hero.classList.add("off"); return; } // pseudo obligatoire avant tout le reste
   if (ui.tab === "cal") ui.viewAs = null; // le calendrier se règle avec les pastilles Moi / Sophie / Nous
-  $("#plusBtn").style.visibility = ui.tab === "settings" ? "hidden" : "visible"; $("#mTask").hidden = permOff("tasks"); $("#mSport").hidden = permOff("sport");
+  $("#plusBtn").style.visibility = ui.tab === "settings" || ui.tab === "story" ? "hidden" : "visible"; $("#mTask").hidden = permOff("tasks"); $("#mSport").hidden = permOff("sport");
+  if (ui.tab === "story" && story.ready && !(storyOn() && storyOpen())) ui.tab = "cal"; // Story fermé : retour au calendrier
   if (permOff(ui.tab)) { ui.tab = "cal"; toast("Cette fonction est désactivée pour ton profil. Demande à Nelson pour l'activer."); }
-  document.querySelectorAll(".tab").forEach((t) => { t.classList.toggle("on", t.dataset.tab === ui.tab); t.hidden = permOff(t.dataset.tab); });
+  document.querySelectorAll(".tab").forEach((t) => { t.classList.toggle("on", t.dataset.tab === ui.tab); t.hidden = permOff(t.dataset.tab) || (t.dataset.tab === "story" && !storyOn()); t.classList.toggle("locked", t.dataset.tab === "story" && storyOn() && !storyOpen()); });
   document.body.classList.toggle("solo", cloud && !isNS(me));
   renderHero();
   applySeason();
@@ -440,6 +446,7 @@ function render(animate = false) {
   else if (ui.tab === "tasks") view.innerHTML = viewTasks();
   else if (ui.tab === "sport") view.innerHTML = viewSport();
   else if (ui.tab === "astro") view.innerHTML = viewAstro();
+  else if (ui.tab === "story") view.innerHTML = viewStory();
   else view.innerHTML = ui.admin && isAdmin ? (adminOk ? viewAdmin() : viewAdminLock()) : viewSettings();
   document.body.classList.toggle("viewing", viewing() && (ui.tab === "cal" || ui.tab === "tasks"));
   view.classList.toggle("enter", animate);
@@ -682,7 +689,7 @@ function viewCalendar() {
     const has = door && evd.length > 0;
     const cls = ["day", "cal", !inMonth ? "out" : "", iso === today ? "today" : "", iso === ui.selected ? "sel" : "",
       door ? "door" : "", door && d.getDate() % 2 ? "odd" : "", has ? "open" : "", dec && inMonth && d.getDate() === 24 ? "eve" : ""].join(" ");
-    cells += `<div role="button" tabindex="0" class="${cls}" data-act="pick" data-date="${iso}"><span class="dn">${d.getDate()}<span class="dots">${tcols.map((c) => `<i class="dot" style="background:${c}"></i>`).join("")}</span></span>${bars}${more}</div>`;
+    cells += `<div role="button" tabindex="0" class="${cls}" data-act="pick" data-date="${iso}"><span class="dn">${storyOf(iso) ? `<i class="bk" aria-label="Notre histoire">📖</i>` : ""}${d.getDate()}<span class="dots">${tcols.map((c) => `<i class="dot" style="background:${c}"></i>`).join("")}</span></span>${bars}${more}</div>`;
   }
 
   const sel = fromISO(ui.selected);
@@ -718,7 +725,8 @@ function viewCalendar() {
         <div class="time">${tFreq(t) ? ((tmeta(t).dn || []).includes(ui.selected) ? "✓" : "🔁") : isCk(t) ? (mine(t) >= 100 ? "✓" : "☐") : mine(t) + "%"} <span class="chev" aria-hidden="true">›</span></div>
       </div>`).join("")}<small class="muted">Touche une tâche pour l'ouvrir dans l'onglet Tâches.</small></div>` : ""}
 
-    ${SPORT_HOME ? sportCard() : ""}`;
+    ${SPORT_HOME ? sportCard() : ""}
+    ${storyCard()}`;
 }
 
 // Liens Hevy / Strava de chacun (ouverts dans un nouvel onglet)
@@ -1486,11 +1494,16 @@ document.addEventListener("click", (ev) => {
   const pm = $("#plusMenu"); if (pm && !pm.hidden && !ev.target.closest("#plusBtn")) pm.hidden = true;
   const el = ev.target.closest("[data-act], .tab");
   if (!el) return;
-  if (el.classList.contains("tab")) { ui.tab = el.dataset.tab; render(true); window.scrollTo(0, 0); return; }
+  if (el.classList.contains("tab")) {
+    if (el.dataset.tab === "story" && !storyOpen()) { toast("🔒 Pour débloquer l'histoire, ouvre le jour où tout a commencé…"); return; }
+    ui.tab = el.dataset.tab; render(true); window.scrollTo(0, 0); return; }
 
   const act = el.dataset.act;
   if (viewing() && ["new-event", "edit-event", "del-event", "new-task", "edit-task", "del-sheet", "freq-day", "task-check", "goal-open", "new-sport", "save-sport", "del-task", "save-prog", "save-event", "save-task", "profile", "log-toggle", "goal-set", "goal-step", "goal-save", "goal-drop", "custom-add", "custom-del", "hevy-refresh", "watch-sync", "watch-remove", "strava-save", "garmin-save"].includes(act)) { toast("Lecture seule : tu consultes le profil de " + (prof(ui.viewAs)?.name || "l'autre")); return; }
   switch (act) {
+    case "story-day": playStory(el.dataset.id, 0); break;
+    case "story-play": playStory(el.dataset.id, +el.dataset.from || 0); break;
+    case "story-pub": storyPublish(el.dataset.id); break;
     case "vis-switch": {
       const inp = document.getElementById(el.dataset.for), pub = inp.value !== el.dataset.pub;
       inp.value = pub ? el.dataset.pub : el.dataset.priv;
@@ -1613,7 +1626,7 @@ document.addEventListener("click", (ev) => {
     }
     case "goto-goal": ui.tab = "tasks"; render(true); setTimeout(() => { const g = document.getElementById("sport-goal"); if (!g) return; g.scrollIntoView({ behavior: "smooth", block: "center" }); g.classList.add("flash"); }, 80); break;
     case "view-as": ui.viewAs = el.dataset.id === me ? null : el.dataset.id; render(); break;
-    case "pick": ui.selected = el.dataset.date; ui.month = startOfMonth(fromISO(ui.selected)); render(); break; // un jour d'un autre mois fait changer de mois
+    case "pick": ui.selected = el.dataset.date; ui.month = startOfMonth(fromISO(ui.selected)); render(); storyPicked(ui.selected); break; // un jour d'un autre mois fait changer de mois
     case "show-toggle": ui.show = { [el.dataset.k]: true }; render(); break; // un seul choix : Nelson, Sophie ou Nous
     case "body-p": ui.bodyP = el.dataset.v === "week" ? "week" : "month"; render(); break;
     case "month": ui.month = new Date(ui.month.getFullYear(), ui.month.getMonth() + Number(el.dataset.dir), 1); render(); break;
@@ -1909,6 +1922,7 @@ document.addEventListener("input", (ev) => {
   if (el.dataset.pname) { const p = prof(el.dataset.pname); if (p) p.name = el.value.trim() || p.name; }
 });
 document.addEventListener("change", (ev) => {
+  if (ev.target.id === "storyFile") { storyImport(ev.target.files[0]); ev.target.value = ""; return; }
   if (ev.target.dataset.act === "slide") { // sauvegarde automatique quand on lâche le curseur
     const t = state.tasks.find((x) => x.id === ev.target.dataset.id);
     if (t) { pendingProg.delete(t.id); save(); push("set_progress", { p_id: t.id, p_value: mine(t) }); toast("Avancement enregistré"); }
@@ -2016,6 +2030,96 @@ render();
 // Charge les données du profil, puis rafraîchit régulièrement (pour voir ce que l'autre ajoute)
 let lastSnap = "", lastPing = 0, lastAdm = 0;
 const dedup = new Set(); // jours déjà nettoyés (évite de réessayer en boucle hors connexion)
+
+// ---------------------------------------------------------------
+// STORY : « Notre histoire » (animations). Le contenu vient de la base (privé) ; le lecteur (story.js) ne se charge qu'à la demande.
+// Nelson : toujours ouvert. Sophie : fermé (cadenas) jusqu'à ce qu'elle touche le jour du chapitre dans le calendrier.
+// ---------------------------------------------------------------
+async function loadStory() {
+  if (!storyOn()) return;
+  try {
+    const l = await rpc("story_list", { p_token: token }), snap = JSON.stringify(l);
+    story.ready = true;
+    if (snap !== story.snap) { story.snap = snap; story.list = l || []; if (!sheet.open) render(); }
+  } catch (e) { story.ready = true; console.warn("story_list", e); } // migration 28 pas encore lancée : Story reste fermé
+}
+// Sophie touche le jour d'un chapitre publié : l'histoire se débloque pour elle
+async function storyPicked(iso) {
+  const c = storyOf(iso);
+  if (!c || isAdmin || c.unlocked) return;
+  try { await rpc("story_unlock", { p_token: token, p_day: iso }); await loadStory(); if (storyOpen()) toast("📖 Story débloqué !"); } catch (e) { console.warn(e); }
+}
+function storyCard() { // lien en bas du calendrier vers l'histoire du jour sélectionné
+  const c = storyOf(ui.selected);
+  if (!c) return "";
+  return `<div class="card story-card"><h3>📖 Notre histoire</h3><small class="muted">Chapitre ${c.num} · ${esc(c.title)}</small>
+    <button type="button" class="add-btn" data-act="story-day" data-id="${c.id}">▶ Ce jour-là…</button></div>`;
+}
+function storyAssets() { // charge le lecteur (JS + styles) seulement au premier lancement
+  if (window.Story) return Promise.resolve();
+  return new Promise((ok, ko) => {
+    if (!document.getElementById("story-css")) { const l = document.createElement("link"); l.id = "story-css"; l.rel = "stylesheet"; l.href = "story.css"; document.head.appendChild(l); }
+    const sc = document.createElement("script"); sc.src = "story.js"; sc.onload = ok; sc.onerror = () => ko(new Error("story.js")); document.head.appendChild(sc);
+  });
+}
+async function storySheet(id) {
+  if (!story.sheets[id]) { const d = await rpc("story_get", { p_token: token, p_id: id }); story.sheets[id] = d.sheet; }
+  return story.sheets[id];
+}
+async function playStory(id, from) {
+  if (story.busy) return;
+  story.busy = true;
+  try {
+    const c = story.list.find((x) => x.id === id);
+    if (c && !isAdmin && !c.unlocked) { await rpc("story_unlock", { p_token: token, p_day: String(c.day).slice(0, 10) }); await loadStory(); }
+    await storyAssets();
+    const sh = await storySheet(id);
+    Story.open(sh, { from: from || 0, onClose: () => render() });
+  } catch (e) {
+    console.warn("story", e);
+    toast(String(e.message).includes("verrouillé") ? "🔒 Story verrouillé" : "Impossible de lancer l'histoire");
+  } finally { story.busy = false; }
+}
+function viewStory() {
+  if (!storyOn() || !storyOpen()) return `<div class="empty">🔒 Story verrouillé</div>`;
+  const day = (iso) => { const d = fromISO(String(iso).slice(0, 10)); return `${d.getDate()} ${MOIS_LONG[d.getMonth()]} ${d.getFullYear()}`; };
+  let h = "";
+  for (const c of story.list) {
+    if (!c.unlocked) { h += `<div class="card"><h3>🔒 Chapitre ${c.num}</h3><small class="muted">Verrouillé</small></div>`; continue; }
+    const sh = story.sheets[c.id];
+    if (c.has_sheet && !sh && !story.loading[c.id]) { story.loading[c.id] = true; storySheet(c.id).then(() => { if (ui.tab === "story") render(); }).catch((e) => { console.warn(e); }); }
+    h += `<div class="card story-card"><h3>📖 Chapitre ${c.num} · ${esc(c.title)}</h3><small class="muted">${day(c.day)}${isAdmin ? (c.published ? " · publié" : " · brouillon") : ""}</small>
+      ${c.has_sheet ? `<button type="button" class="add-btn" data-act="story-play" data-id="${c.id}" data-from="0">▶ Lancer le chapitre</button>` : `<div class="empty">Aucune fiche importée.</div>`}
+      ${sh && Array.isArray(sh.marks) ? sh.marks.map((m) => `<div class="row" data-act="story-play" data-id="${c.id}" data-from="${m.i}" style="cursor:pointer"><div class="bar-owner" style="background:${COMMUN_COLOR}"></div><div class="t"><b>${esc(m.label)}</b></div><div class="time">${esc(m.t)}</div></div>`).join("") : (c.has_sheet ? `<div class="empty">Chargement…</div>` : "")}
+      ${isAdmin ? `<button type="button" class="add-btn gre" data-act="story-pub" data-id="${c.id}">${c.published ? "✅ Publié : Sophie le voit (toucher pour repasser en brouillon)" : "📝 Brouillon : invisible pour Sophie (toucher pour publier)"}</button>` : ""}
+    </div>`;
+  }
+  if (!story.list.length) h += `<div class="card"><h3>📖 Notre histoire</h3><div class="empty">Aucun chapitre pour l'instant.</div></div>`;
+  if (isAdmin) h += `<div class="card"><h3>Importer un chapitre</h3><small class="muted">Fichier .json de la fiche (le contenu est enregistré dans la base privée, pas dans le dépôt).</small>
+    <label class="add-btn">📥 Choisir un fichier<input type="file" id="storyFile" accept=".json,application/json" hidden></label></div>`;
+  return h;
+}
+async function storyImport(file) {
+  if (!file || !isAdmin) return;
+  try {
+    const sh = JSON.parse(await file.text());
+    if (!sh || !/^[a-z0-9_-]{1,40}$/.test(sh.id || "") || !Array.isArray(sh.steps) || !/^\d{4}-\d{2}-\d{2}$/.test(sh.day || "")) throw new Error("fiche invalide");
+    const cur = story.list.find((c) => c.id === sh.id);
+    await rpc("story_save", { p_token: token, p_id: sh.id, p_num: sh.num || 1, p_title: sh.title || "", p_day: sh.day, p_published: cur ? cur.published : false, p_sheet: sh });
+    delete story.sheets[sh.id]; delete story.loading[sh.id]; story.snap = ""; await loadStory(); toast("Chapitre importé");
+  } catch (e) {
+    console.warn(e); toast(/story_save|function|schema/i.test(String(e.message)) ? "Import impossible : lance d'abord la migration 28 dans Supabase" : "Import impossible : fichier non valide");
+  }
+}
+async function storyPublish(id) {
+  const c = story.list.find((x) => x.id === id);
+  if (!c || !isAdmin) return;
+  try {
+    await rpc("story_save", { p_token: token, p_id: c.id, p_num: c.num, p_title: c.title, p_day: String(c.day).slice(0, 10), p_published: !c.published });
+    story.snap = ""; await loadStory(); toast(c.published ? "Chapitre repassé en brouillon" : "Chapitre publié");
+  } catch (e) { console.warn(e); toast("Échec : réessaie"); }
+}
+
 async function pull() {
   if (inflight) return;
   try {
@@ -2061,6 +2165,7 @@ async function pull() {
 }
 function startCloud() {
   pull().then(() => {
+    loadStory();
     try { // retour de Strava après autorisation : ?code=...&scope=...&state=strava
       const q = new URLSearchParams(location.search);
       if (q.get("state") === "strava") {
@@ -2080,7 +2185,7 @@ function startCloud() {
     const idle = Date.now() - lastAct, delay = idle < 120000 ? 20000 : idle < 600000 ? 60000 : 180000;
     setTimeout(() => { if (!document.hidden) pull(); loop(); }, delay);
   })();
-  addEventListener("focus", () => pull());
+  addEventListener("focus", () => { pull(); loadStory(); });
   document.addEventListener("visibilitychange", () => { if (!document.hidden) pull(); });
 }
 

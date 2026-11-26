@@ -1636,3 +1636,94 @@ begin
 end $$;
 revoke all on function upsert_task(uuid,text,text,text,text,int,text,text,int,text) from public;
 grant execute on function upsert_task(uuid,text,text,text,text,int,text,text,int,text) to anon, authenticated;
+
+
+-- 28. Story : chapitres de « Notre histoire » (privés).
+-- Le déroulé (textes, étapes) est stocké ICI, pas dans le dépôt public. RLS activée, aucune politique : tout passe par des fonctions.
+-- Nelson (admin) voit tout et importe / publie. Sophie ne voit que les chapitres PUBLIÉS, et seulement après avoir touché le jour du chapitre dans le calendrier.
+create table if not exists story_chapters (
+  id         text primary key check (id ~ '^[a-z0-9_-]{1,40}$'),
+  num        int  not null default 1,
+  title      text not null default '',
+  day        date not null,
+  published  boolean not null default false,
+  sheet      jsonb,
+  updated_at timestamptz not null default now()
+);
+alter table story_chapters enable row level security;
+create table if not exists story_unlocks (
+  profile_id text not null,
+  chapter_id text not null references story_chapters(id) on delete cascade,
+  at         timestamptz not null default now(),
+  primary key (profile_id, chapter_id)
+);
+alter table story_unlocks enable row level security;
+
+-- Liste des chapitres visibles par moi (sans le contenu). unlocked : true pour Nelson ; pour Sophie seulement après avoir touché le jour.
+create or replace function story_list(p_token uuid) returns json
+language plpgsql stable security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null then raise exception 'lien invalide'; end if;
+  if not (me.is_admin or _is_pair(me.id)) then return '[]'::json; end if;
+  return coalesce((
+    select json_agg(json_build_object('id', c.id, 'num', c.num, 'title', c.title, 'day', c.day, 'published', c.published,
+                                      'has_sheet', c.sheet is not null,
+                                      'unlocked', me.is_admin or exists(select 1 from story_unlocks u where u.chapter_id = c.id and u.profile_id = me.id))
+                    order by c.num, c.day)
+    from story_chapters c where me.is_admin or c.published), '[]'::json);
+end $$;
+
+-- Sophie touche un jour du calendrier : si un chapitre publié tombe ce jour-là, il se débloque pour elle.
+create or replace function story_unlock(p_token uuid, p_day date) returns json
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token); n int;
+begin
+  if me.id is null or not _is_pair(me.id) then raise exception 'interdit'; end if;
+  insert into story_unlocks(profile_id, chapter_id)
+    select me.id, c.id from story_chapters c where c.day = p_day and c.published and c.sheet is not null
+    on conflict do nothing;
+  get diagnostics n = row_count;
+  return json_build_object('unlocked', n);
+end $$;
+
+-- Contenu d'un chapitre : Nelson toujours ; Sophie seulement s'il est publié ET débloqué.
+create or replace function story_get(p_token uuid, p_id text) returns json
+language plpgsql stable security definer set search_path = public as $$
+declare me profiles := _me(p_token); c story_chapters;
+begin
+  if me.id is null or not _is_pair(me.id) then raise exception 'interdit'; end if;
+  select * into c from story_chapters where id = p_id;
+  if not found or c.sheet is null then raise exception 'introuvable'; end if;
+  if not me.is_admin and not (c.published and exists(select 1 from story_unlocks u where u.chapter_id = c.id and u.profile_id = me.id)) then
+    raise exception 'verrouillé';
+  end if;
+  return json_build_object('id', c.id, 'num', c.num, 'title', c.title, 'day', c.day, 'sheet', c.sheet);
+end $$;
+
+-- Import / modification d'un chapitre (Nelson seulement). p_sheet = null : on garde le contenu actuel.
+create or replace function story_save(p_token uuid, p_id text, p_num int, p_title text, p_day date, p_published boolean, p_sheet jsonb default null)
+returns void language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null or not me.is_admin then raise exception 'interdit'; end if;
+  if coalesce(p_id,'') !~ '^[a-z0-9_-]{1,40}$' then raise exception 'invalide'; end if;
+  if p_sheet is not null and (jsonb_typeof(p_sheet) <> 'object' or length(p_sheet::text) > 400000 or jsonb_typeof(p_sheet->'steps') <> 'array') then raise exception 'fiche invalide'; end if;
+  insert into story_chapters(id, num, title, day, published, sheet)
+  values (p_id, coalesce(p_num,1), left(coalesce(p_title,''),120), p_day, coalesce(p_published,false), p_sheet)
+  on conflict (id) do update set num = excluded.num, title = excluded.title, day = excluded.day, published = excluded.published,
+    sheet = coalesce(excluded.sheet, story_chapters.sheet), updated_at = now();
+end $$;
+
+create or replace function story_delete(p_token uuid, p_id text) returns void
+language plpgsql security definer set search_path = public as $$
+declare me profiles := _me(p_token);
+begin
+  if me.id is null or not me.is_admin then raise exception 'interdit'; end if;
+  delete from story_chapters where id = p_id;
+end $$;
+
+revoke all on function story_list(uuid), story_unlock(uuid,date), story_get(uuid,text),
+  story_save(uuid,text,int,text,date,boolean,jsonb), story_delete(uuid,text) from public;
+grant execute on function story_list(uuid), story_unlock(uuid,date), story_get(uuid,text),
+  story_save(uuid,text,int,text,date,boolean,jsonb), story_delete(uuid,text) to anon, authenticated;
