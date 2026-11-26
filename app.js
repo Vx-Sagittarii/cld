@@ -670,9 +670,10 @@ function viewCalendar() {
     const inMonth = d.getMonth() === m.getMonth();
     // Événements du jour (titres dans la case) : journée entière d'abord, puis par heure
     const evd = EV.map((e) => inst(e, iso)).filter((e) => e && cpass(e)).sort((a, b) => (segFor(a, iso)?.s ?? -1) - (segFor(b, iso)?.s ?? -1));
-    const tcols = [...new Set(state.tasks.filter((t) => touches(t, fromISO(iso), fromISO(iso)) && cpass(t)).map(colorOf))].slice(0, 3);
+    // Pastille de tâche : seulement pour les tâches courtes (≤ 7 jours) ou fréquentes, sinon une tâche d'un an mettrait un point partout
+    const tcols = [...new Set(state.tasks.filter((t) => touches(t, fromISO(iso), fromISO(iso)) && cpass(t) && (tFreq(t) || (deadlineOf(t) - startOfTask(t)) / 864e5 <= 6)).map(colorOf))].slice(0, 3);
     const bars = evd.slice(0, 3).map((e) => `<i class="eb" style="--c:${colorOf(e)}">${esc(e.title)}</i>`).join("");
-    const more = evd.length > 3 ? `<small class="more">Encore ${evd.length - 3}</small>` : "";
+    const more = evd.length > 3 ? `<small class="more">+${evd.length - 3}</small>` : "";
     const door = dec && inMonth && d.getDate() <= 25;
     const has = door && evd.length > 0;
     const cls = ["day", "cal", !inMonth ? "out" : "", iso === today ? "today" : "", iso === ui.selected ? "sel" : "",
@@ -1936,6 +1937,10 @@ function importData(file) {
 // ---------------------------------------------------------------
 // Glisser le doigt à gauche / à droite = flèches suivant / précédent du bandeau (mois ou période)
 // ---------------------------------------------------------------
+(function fabFade() {
+  let tm = 0; const fab = $("#plusBtn");
+  addEventListener("scroll", () => { if (!fab) return; fab.classList.add("scrolling"); clearTimeout(tm); tm = setTimeout(() => fab.classList.remove("scrolling"), 600); }, { passive: true });
+})();
 (function setupSwipe() {
   let x0 = 0, y0 = 0, t0 = 0, ok = false;
   const skip = "input, select, textarea, dialog, button.chk, .pbar, .nchips, .wkbars, .strip, .chat-panel, .hero-media";
