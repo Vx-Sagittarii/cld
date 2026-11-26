@@ -1325,16 +1325,15 @@ function openEventSheet(forId, edit) {
   const cur = w === "nous" || w === "partner" || w === "me" ? w : (w === me ? "me" : w === pid ? "partner" : "nous");
   const priv = edit ? edit.scope === "perso" : true;
   sheetForm.dataset.edit = edit ? edit.id : "";
-  sheetForm.innerHTML = `<div class="sheet ${allDay0 ? "is-allday" : ""}" id="evSheet">
+  sheetForm.innerHTML = `<div class="sheet" id="evSheet">
     ${sheetTop(edit ? "Modifier l'événement" : "Nouvel événement", "save-event")}
     <div class="field"><input type="text" id="fTitle" value="${esc(v.title)}" placeholder="Nom de l'événement" autocomplete="off"></div>
     ${whoField(edit ? cur : cur, priv)}
     <div class="tcard">
-      <label class="trow"><span>Toute la journée</span><input type="checkbox" class="tgl" id="fAll" ${allDay0 ? "checked" : ""}></label>
       <div class="trow"><span>Commence</span><span class="dt"><input type="date" id="fDate" value="${v.date}"><input type="time" id="fTime" class="tm" value="${v.t1}"></span></div>
       <div class="trow"><span>Se termine</span><span class="dt"><input type="date" id="fEnd" value="${v.end}" min="${v.date}"><input type="time" id="fTimeEnd" class="tm" value="${v.t2}"></span></div>
     </div>
-    <div class="span-hint" id="spanHint"></div>
+    <div class="span-hint" id="spanHint">Sans heure : toute la journée.</div>
     <div class="tcard">
       <div class="trow"><span>Répéter</span><select id="fRep">${opt("", "Jamais", m.rep)}${Object.keys(REP_LABEL).map((k) => opt(k, REP_LABEL[k], m.rep)).join("")}</select></div>
       <div class="trow"><span>Alerte 🔔</span><select id="fRem">${opt("", "Aucune", m.rem)}${opt(0, "À l'heure", m.rem)}${opt(10, "10 minutes avant", m.rem)}${opt(60, "1 heure avant", m.rem)}${opt(1440, "1 jour avant", m.rem)}</select></div>
@@ -1344,13 +1343,12 @@ function openEventSheet(forId, edit) {
   </div>`;
   sheet.showModal();
   let prevDate = v.date;
-  const allOn = () => $("#fAll").checked;
   const upd = () => {
     const date = $("#fDate").value || ui.selected;
     $("#fEnd").min = date;
-    const r = computeSpan(date, $("#fEnd").value, allOn() ? "" : $("#fTime").value, allOn() ? "" : $("#fTimeEnd").value), h = $("#spanHint");
+    const r = computeSpan(date, $("#fEnd").value, $("#fTime").value, $("#fTimeEnd").value), h = $("#spanHint");
     const er = $("#sheetErr"); if (er) er.remove();
-    if (r.err || !r.endDate) h.textContent = "";
+    if (r.err || !r.endDate) h.textContent = $("#fTime").value ? "" : "Sans heure : toute la journée.";
     else { const n = daysBetween(date, r.endDate); h.textContent = n === 1 && ($("#fEnd").value === date || !$("#fEnd").value) ? `La fin compte pour le lendemain (${dm(r.endDate)}).` : `Sur ${n + 1} jours : du ${dm(date)} au ${dm(r.endDate)}.`; }
   };
   $("#fDate").addEventListener("input", () => { // la fin suit le début tant qu'on ne l'a pas déplacée
@@ -1358,11 +1356,6 @@ function openEventSheet(forId, edit) {
     prevDate = d || prevDate; upd();
   });
   ["fEnd", "fTime", "fTimeEnd"].forEach((i) => $("#" + i).addEventListener("input", upd));
-  $("#fAll").addEventListener("change", () => {
-    $("#evSheet").classList.toggle("is-allday", allOn());
-    if (!allOn() && !$("#fTime").value) { const h = (new Date().getHours() + 1) % 24; $("#fTime").value = hhmm(h * 60); $("#fTimeEnd").value = hhmm(((h + 1) % 24) * 60); } // proposition ; vide = toute la journée
-    upd();
-  });
   $("#fRem").addEventListener("change", () => { if ($("#fRem").value !== "" && cloud && !(Notification?.permission === "granted" && localStorage.getItem(PUSH_KEY) === "1")) toast("Active les rappels dans Réglages pour être notifié"); });
   upd();
   if (!edit) setTimeout(() => $("#fTitle").focus(), 50);
@@ -1578,8 +1571,7 @@ document.addEventListener("click", (ev) => {
       const title = $("#fTitle").value.trim();
       if (!title) { sheetErr("Donne un titre avant d'enregistrer."); $("#fTitle").focus(); return; }
       const date = $("#fDate").value || ui.selected;
-      const allDay = $("#fAll").checked; // heure facultative : sans heure de début = toute la journée
-      const t1 = allDay ? "" : $("#fTime").value, t2 = allDay || !t1 ? "" : $("#fTimeEnd").value;
+      const t1 = $("#fTime").value, t2 = t1 ? $("#fTimeEnd").value : ""; // heures facultatives : vide = toute la journée
       const span = computeSpan(date, $("#fEnd").value, t1, t2);
       if (span.err) { sheetErr(span.err); return; }
       const time = (t1 ? (t2 ? `${t1}-${t2}` : t1) : "") + (span.endDate ? `>${span.endDate}` : "");
