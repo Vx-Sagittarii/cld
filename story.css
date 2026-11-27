@@ -2,7 +2,7 @@
 #story{position:fixed;inset:0;z-index:1000;background:#0d0716;display:grid;place-items:center;overflow:hidden;font-family:"Press Start 2P","Courier New",monospace;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;touch-action:manipulation;color:#fff}
 #story *{box-sizing:border-box}
 #story button{font-family:inherit}
-#story #stage{position:relative;width:390px;height:760px;overflow:hidden;background:#1b0f33;transform-origin:center}
+#story #stage{position:absolute;left:50%;top:50%;margin:-380px 0 0 -195px;width:390px;height:760px;overflow:hidden;background:#1b0f33;transform-origin:center}  /* centré même si l'écran est plus bas que 760 px */
 #story #bg,#story #back,#story #tablel,#story #front,#story #fx{position:absolute;inset:0;pointer-events:none}
 #story #bg{z-index:1}
 #story #back{z-index:2}
