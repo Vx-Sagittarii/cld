@@ -786,7 +786,7 @@ body.tb-home main { padding-top: calc(env(safe-area-inset-top) + 12px); }
 .calhead { display: flex; align-items: center; gap: 6px; margin: 4px 0 10px; }
 .calhead .ch-mid { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; }
 .calhead b { flex: 1; text-align: center; font-size: 17px; text-transform: capitalize; }
-.calhead::after { content: ""; width: 40px; flex: none; }
 .calhead > .tb-arrow svg { width: 24px; height: 24px; }
 .calhead b { font-size: 22px; font-weight: 800; letter-spacing: .01em; } .calhead b span { font-weight: 600; color: var(--muted); font-size: 18px; }
 .calhead .tb-arrow { width: 44px; height: 44px; }
+.calhead b { font-size: 20px; white-space: nowrap; } .calhead b span { font-size: 16px; }
