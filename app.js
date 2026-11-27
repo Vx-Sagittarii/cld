@@ -429,8 +429,10 @@ function updateTopbar() {
 }
 // Accueil : la barre du haut n'apparaît que lorsqu'on a défilé sous le calendrier
 function homeBar() {
-  const c = document.querySelector(".calcard");
-  document.body.classList.toggle("tb-show", !(document.body.classList.contains("tb-home")) || !!(c && c.getBoundingClientRect().bottom < 40));
+  const b = document.body, c = document.querySelector(".calcard");
+  if (!b.classList.contains("tb-home")) { b.classList.add("tb-show"); return; }
+  const de = document.documentElement, bas = window.scrollY > 40 && window.scrollY + innerHeight >= de.scrollHeight - 4; // fin de page atteinte (page courte)
+  b.classList.toggle("tb-show", !!c && (c.getBoundingClientRect().bottom < innerHeight * 0.6 || bas));
 }
 addEventListener("scroll", () => homeBar(), { passive: true });
 function render(animate = false) {
@@ -709,6 +711,12 @@ function viewCalendar() {
     ${countdownCards()}
     ${dec ? adventCountdown() : ""}
     ${gcal.on && !gcal.token ? `<button class="add-btn gre" data-act="gcal-connect-silent">Reconnecter Google Agenda</button>` : ""}
+    <div class="calhead">
+      <button type="button" class="tb-arrow" data-act="goto-settings" aria-label="Réglages"><svg viewBox="0 0 24 24" aria-hidden="true">${$("#gearBtn").innerHTML.replace(/^\s*<svg[^>]*>|<\/svg>\s*$/g, "")}</svg></button>
+      <div class="ch-mid"><button type="button" class="tb-arrow" data-act="month" data-dir="-1" aria-label="Mois précédent"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg></button>
+        <b>${MOIS_LONG[m.getMonth()]} <span>${m.getFullYear()}</span></b>
+        <button type="button" class="tb-arrow" data-act="month" data-dir="1" aria-label="Mois suivant"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button></div>
+    </div>
     <div class="card calcard ${dec ? "advent-grid" : ""}">
       <div class="dow"><span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span></div>
       <div class="grid cal">${cells}</div>
@@ -1509,6 +1517,7 @@ document.addEventListener("click", (ev) => {
   const act = el.dataset.act;
   if (viewing() && ["new-event", "edit-event", "del-event", "new-task", "edit-task", "del-sheet", "freq-day", "task-check", "goal-open", "new-sport", "save-sport", "del-task", "save-prog", "save-event", "save-task", "profile", "log-toggle", "goal-set", "goal-step", "goal-save", "goal-drop", "custom-add", "custom-del", "hevy-refresh", "watch-sync", "watch-remove", "strava-save", "garmin-save"].includes(act)) { toast("Lecture seule : tu consultes le profil de " + (prof(ui.viewAs)?.name || "l'autre")); return; }
   switch (act) {
+    case "goto-settings": ui.tab = "settings"; render(true); window.scrollTo(0, 0); break;
     case "story-day": playStory(el.dataset.id, 0); break;
     case "story-play": playStory(el.dataset.id, +el.dataset.from || 0); break;
     case "story-pub": storyPublish(el.dataset.id); break;
